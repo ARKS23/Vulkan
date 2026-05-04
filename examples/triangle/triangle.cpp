@@ -898,9 +898,11 @@ public:
 		createCommandBuffers();
 		createVertexBuffer();
 		createUniformBuffers();
+
 		createDescriptorSetLayout();
 		createDescriptorPool();
 		createDescriptorSets();
+		
 		createPipelines();
 		prepared = true;
 	}

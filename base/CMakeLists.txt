@@ -3,6 +3,10 @@
 
 file(GLOB BASE_SRC "*.cpp" "*.hpp" "*.h" "../external/imgui/*.cpp")
 file(GLOB BASE_HEADERS "*.hpp" "*.h")
+list(APPEND BASE_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/vk_initializers.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vk_initializers.h")
+list(REMOVE_DUPLICATES BASE_SRC)
 
 set(KTX_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/ktx)
 set(KTX_SOURCES

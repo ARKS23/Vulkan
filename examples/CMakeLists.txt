@@ -185,6 +185,7 @@ set(EXAMPLES
 	vertexattributes
 	viewportarray
 	vulkanscene
+	lab0
 )
 
 buildExamples()
