@@ -5,7 +5,8 @@ file(GLOB BASE_SRC "*.cpp" "*.hpp" "*.h" "../external/imgui/*.cpp")
 file(GLOB BASE_HEADERS "*.hpp" "*.h")
 list(APPEND BASE_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/vk_initializers.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vk_initializers.h")
+    "${CMAKE_CURRENT_SOURCE_DIR}/vk_initializers.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vma_impl.cpp")
 list(REMOVE_DUPLICATES BASE_SRC)
 
 set(KTX_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/ktx)
@@ -31,6 +32,7 @@ source_group("Shaders\\SLANG" FILES ${SHADERS_SLANG})
 message(STATUS ${SHADERS_GLSL})
 
 add_library(base STATIC ${BASE_SRC} ${KTX_SOURCES} ${SHADERS_GLSL} ${SHADERS_HLSL} ${SHADERS_SLANG})
+target_include_directories(base PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../external/vma)
 if(WIN32)
     target_link_libraries(base ${Vulkan_LIBRARY} ${WINLIBS})
  else(WIN32)

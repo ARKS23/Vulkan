@@ -41,10 +41,13 @@ public:
         glm::mat4 viewMatrix;
     };
 
+    struct MeshData {
+        std::vector<Vertex> vertices;
+        std::vector<uint32_t> indices;
+    };
+
 public:
-    VulkanBuffer vertexBuffer;
-	VulkanBuffer indexBuffer;
-	uint32_t indexCount{ 0 };
+	GPUMeshBuffers circleMeshBuffers;
 
     std::array<UniformBuffer, MAX_CONCURRENT_FRAMES> uniformBuffers; // 每个 in-flight frame 对应一份 UBO
 
@@ -64,6 +67,8 @@ public:
 
     VkPhysicalDeviceVulkan13Features enabledFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
 
+	VmaAllocator allocator{ VK_NULL_HANDLE }; // 等稳定后加入基类
+
 public:
     VulkanExample();
     virtual ~VulkanExample() override;
@@ -71,6 +76,7 @@ public:
     virtual void getEnabledFeatures() override;
     uint32_t getMemoryTypeIndex(uint32_t typeBits, VkMemoryPropertyFlags properties);
 
+	void createVmaAllocator();
     void createSynchronizationPrimitives();
     void createCommandBuffers();
     void createVertexBuffer();
@@ -87,6 +93,14 @@ public:
     // dynamic render不需要这两个了，这里把它们重写成空实现，否则基类会按传统路径去创建 framebuffer 和 render pass
 	void setupFrameBuffer() override {}
 	void setupRenderPass() override {}
+
+	void destroyVmaAllocator();
+
+	//helper function 稳定后加入工具函数
+	AllocatedBuffer createAllocatedBuffer(size_t allocSize, VkBufferUsageFlags usage,  VmaAllocationCreateFlags allocationFlags, VmaMemoryUsage memoryUsage);
+
+private:
+	MeshData createCircleMesh(float radius, uint32_t segmentCount);
 };
 
 

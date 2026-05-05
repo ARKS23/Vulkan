@@ -21,10 +21,15 @@ VulkanExample::~VulkanExample() {
         vkDestroyPipeline(device, pipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
-        vkDestroyBuffer(device, vertexBuffer.handle, nullptr);
-        vkFreeMemory(device, vertexBuffer.memory, nullptr);
-        vkDestroyBuffer(device, indexBuffer.handle, nullptr);
-        vkFreeMemory(device, indexBuffer.memory, nullptr);
+
+        if (circleMeshBuffers.vertexBuffer.handle != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator, circleMeshBuffers.vertexBuffer.handle, circleMeshBuffers.vertexBuffer.allocation);
+        }
+
+        if (circleMeshBuffers.indexBuffer.handle != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator, circleMeshBuffers.indexBuffer.handle, circleMeshBuffers.indexBuffer.allocation);
+        }
+
         vkDestroyCommandPool(device, commandPool, nullptr);
 
         for (size_t i = 0; i < presentCompleteSemaphores.size(); i++) {
@@ -38,6 +43,8 @@ VulkanExample::~VulkanExample() {
             vkDestroyBuffer(device, uniformBuffers[i].handle, nullptr);
             vkFreeMemory(device, uniformBuffers[i].memory, nullptr);
         }
+
+        destroyVmaAllocator();
     }
 }
 
@@ -58,6 +65,15 @@ uint32_t VulkanExample::getMemoryTypeIndex(uint32_t typeBits, VkMemoryPropertyFl
         typeBits >>= 1;
     }
     throw "Could not find a suitable memory type!";
+}
+
+void VulkanExample::createVmaAllocator() {
+    VmaAllocatorCreateInfo allocatorInfo {};
+    allocatorInfo.physicalDevice = physicalDevice;
+    allocatorInfo.device = device;
+    allocatorInfo.instance = instance;
+    allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
+    VK_CHECK_RESULT(vmaCreateAllocator(&allocatorInfo, &allocator));
 }
 
 void VulkanExample::createSynchronizationPrimitives() {
@@ -92,57 +108,44 @@ void VulkanExample::createCommandBuffers() {
 }
 
 void VulkanExample::createVertexBuffer() {
+    MeshData circle = createCircleMesh(0.8f, 64);
+
     // 顶点数据
-    const std::vector<Vertex> vertices{
-        { {  1.0f,  1.0f, 0.0f }, { 1.0f, 0.0f, 0.0f } },
-        { { -1.0f,  1.0f, 0.0f }, { 0.0f, 1.0f, 0.0f } },
-        { {  0.0f, -1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } }
-    };
+    const std::vector<Vertex> &vertices = circle.vertices;
     uint32_t vertexBufferSize = static_cast<uint32_t>(vertices.size()) * sizeof(Vertex);
 
     // 索引数据
-    std::vector<uint32_t> indices{ 0, 1, 2 };
-    indexCount = static_cast<uint32_t>(indices.size());
+    const std::vector<uint32_t> &indices = circle.indices;
+    const uint32_t indexCount = static_cast<uint32_t>(indices.size());
     uint32_t indexBufferSize = indexCount * sizeof(uint32_t);
 
     // 经典Staging Buffer流程
-    VkMemoryAllocateInfo memAlloc{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-	VkMemoryRequirements memReqs;
-    VulkanBuffer stagingBuffer;
-    VkBufferCreateInfo stagingBufferCI{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-    stagingBufferCI.size = vertexBufferSize + indexBufferSize;
-    stagingBufferCI.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    VK_CHECK_RESULT(vkCreateBuffer(device, &stagingBufferCI, nullptr, &stagingBuffer.handle));
-    vkGetBufferMemoryRequirements(device, stagingBuffer.handle, &memReqs);
-    memAlloc.allocationSize = memReqs.size;
-    memAlloc.memoryTypeIndex = getMemoryTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &stagingBuffer.memory));
-	VK_CHECK_RESULT(vkBindBufferMemory(device, stagingBuffer.handle, stagingBuffer.memory, 0));
-
-    uint8_t* data{ nullptr };
-    VK_CHECK_RESULT(vkMapMemory(device, stagingBuffer.memory, 0, memAlloc.allocationSize, 0, (void**)&data));
+    AllocatedBuffer stagingBuffer = createAllocatedBuffer(
+        vertexBufferSize + indexBufferSize,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        VMA_MEMORY_USAGE_AUTO
+    );
+    uint8_t* data = static_cast<uint8_t*>(stagingBuffer.allocationInfo.pMappedData);
     memcpy(data, vertices.data(), vertexBufferSize);
-    memcpy(((char*)data) + vertexBufferSize, indices.data(), indexBufferSize);
+    memcpy(data + vertexBufferSize, indices.data(), indexBufferSize);
+    VK_CHECK_RESULT(vmaFlushAllocation(allocator, stagingBuffer.allocation, 0, VK_WHOLE_SIZE));
 
-    VkBufferCreateInfo vertexbufferCI{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-    vertexbufferCI.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    vertexbufferCI.size = vertexBufferSize;
-    VK_CHECK_RESULT(vkCreateBuffer(device, &vertexbufferCI, nullptr, &vertexBuffer.handle));
-    vkGetBufferMemoryRequirements(device, vertexBuffer.handle, &memReqs);
-    memAlloc.allocationSize = memReqs.size;
-    memAlloc.memoryTypeIndex = getMemoryTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &vertexBuffer.memory));
-    VK_CHECK_RESULT(vkBindBufferMemory(device, vertexBuffer.handle, vertexBuffer.memory, 0));
+    circleMeshBuffers.vertexBuffer = createAllocatedBuffer(
+        vertexBufferSize,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        0,
+        VMA_MEMORY_USAGE_AUTO
+    );
 
-    VkBufferCreateInfo indexbufferCI{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-    indexbufferCI.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    indexbufferCI.size = indexBufferSize;
-    VK_CHECK_RESULT(vkCreateBuffer(device, &indexbufferCI, nullptr, &indexBuffer.handle));
-    vkGetBufferMemoryRequirements(device, indexBuffer.handle, &memReqs);
-    memAlloc.allocationSize = memReqs.size;
-    memAlloc.memoryTypeIndex = getMemoryTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &indexBuffer.memory));
-    VK_CHECK_RESULT(vkBindBufferMemory(device, indexBuffer.handle, indexBuffer.memory, 0));
+    circleMeshBuffers.indexBuffer = createAllocatedBuffer(
+        indexBufferSize,
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        0,
+        VMA_MEMORY_USAGE_AUTO
+    );
+    circleMeshBuffers.indexCount = static_cast<uint32_t> (indices.size());
+    circleMeshBuffers.indexType = VK_INDEX_TYPE_UINT32;
 
     VkCommandBuffer copyCmd;
     VkCommandBufferAllocateInfo cmdBufAllocateInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
@@ -156,10 +159,12 @@ void VulkanExample::createVertexBuffer() {
     {
 		VkBufferCopy copyRegion{}; // 把顶点和索引数据拷到 device local buffer
 		copyRegion.size = vertexBufferSize;
-		vkCmdCopyBuffer(copyCmd, stagingBuffer.handle, vertexBuffer.handle, 1, &copyRegion);
+		vkCmdCopyBuffer(copyCmd, stagingBuffer.handle, circleMeshBuffers.vertexBuffer.handle, 1, &copyRegion);
+
 		copyRegion.size = indexBufferSize;
 		copyRegion.srcOffset = vertexBufferSize; // 索引数据在 staging buffer 中紧跟在顶点数据后面，所以这里要设置 srcOffset
-		vkCmdCopyBuffer(copyCmd, stagingBuffer.handle, indexBuffer.handle,	1, &copyRegion);
+        copyRegion.dstOffset = 0;
+		vkCmdCopyBuffer(copyCmd, stagingBuffer.handle, circleMeshBuffers.indexBuffer.handle, 1, &copyRegion);
     }
     VK_CHECK_RESULT(vkEndCommandBuffer(copyCmd));
 
@@ -177,8 +182,9 @@ void VulkanExample::createVertexBuffer() {
 	vkFreeCommandBuffers(device, commandPool, 1, &copyCmd);
 
     // 既然 fence 已确认拷贝完成，就可以安全销毁 staging buffer
-    vkDestroyBuffer(device, stagingBuffer.handle, nullptr);
-    vkFreeMemory(device, stagingBuffer.memory, nullptr);
+    // vkDestroyBuffer(device, stagingBuffer.handle, nullptr);
+    // vkFreeMemory(device, stagingBuffer.memory, nullptr);
+    vmaDestroyBuffer(allocator, stagingBuffer.handle, stagingBuffer.allocation);
 }
 
 void VulkanExample::createUniformBuffers() {
@@ -363,6 +369,8 @@ void VulkanExample::createPipeline() {
 
 void VulkanExample::prepare() {
     VulkanExampleBase::prepare();
+
+    createVmaAllocator();
     createSynchronizationPrimitives();
     createCommandBuffers();
     createVertexBuffer();
@@ -388,7 +396,9 @@ void VulkanExample::render() {
     ShaderData shaderData{};
     shaderData.projectionMatrix = camera.matrices.perspective;
     shaderData.viewMatrix = camera.matrices.view;
-    shaderData.modelMatrix = glm::mat4(1.0f);
+    static float rotation{ 0.0f };
+    //rotation += 0.05f;
+    shaderData.modelMatrix = glm::rotate(glm::mat4(1.f), glm::radians(rotation), glm::vec3(1.0f, 0.0f, 0.0f));
     memcpy(uniformBuffers[currentFrame].mapped, &shaderData, sizeof(ShaderData));
 
     vkResetCommandBuffer(commandBuffers[currentFrame], 0);
@@ -404,7 +414,7 @@ void VulkanExample::render() {
 		colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-		colorAttachment.clearValue.color = { 0.0f, 0.0f, 0.2f, 0.0f };
+		colorAttachment.clearValue.color = { 0.11f, 0.10f, 0.13f, 0.0f };
 
         VkRenderingAttachmentInfo depthStencilAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
 		depthStencilAttachment.imageView = depthStencil.view;
@@ -434,11 +444,11 @@ void VulkanExample::render() {
 		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
         VkDeviceSize offsets[1]{ 0 };
-		vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer.handle, offsets);
+		vkCmdBindVertexBuffers(commandBuffer, 0, 1, &circleMeshBuffers.vertexBuffer.handle, offsets);
 		
-		vkCmdBindIndexBuffer(commandBuffer, indexBuffer.handle, 0, VK_INDEX_TYPE_UINT32);
+		vkCmdBindIndexBuffer(commandBuffer, circleMeshBuffers.indexBuffer.handle, 0, circleMeshBuffers.indexType);
 		
-		vkCmdDrawIndexed(commandBuffer, indexCount, 1, 0, 0, 0);
+		vkCmdDrawIndexed(commandBuffer, circleMeshBuffers.indexCount, 1, 0, 0, 0);
 		
 		vkCmdEndRendering(commandBuffer);
 
@@ -561,4 +571,53 @@ VkShaderModule VulkanExample::loadSPIRVShader(const std::string& filename) {
 			std::cerr << "Error: Could not open shader file \"" << filename << "\"" << std::endl;
 			return VK_NULL_HANDLE;
 		}
+}
+
+VulkanExample::MeshData VulkanExample::createCircleMesh(float radius, uint32_t segmentCount) {
+    MeshData mesh{};
+    mesh.vertices.push_back({ { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f } });
+
+    for (uint32_t i = 0; i < segmentCount; i++) {
+        float angle = 2.0f * glm::pi<float>() * static_cast<float>(i) /
+        static_cast<float>(segmentCount);
+        float x = radius * std::cos(angle);
+        float y = radius * std::sin(angle);
+        float t = static_cast<float>(i) / static_cast<float>(segmentCount);
+        mesh.vertices.push_back({ { x, y, 0.0f }, { t, 1.0f - t, 0.33f } });
+    }
+
+    for (uint32_t i = 0; i < segmentCount; i++) {
+        uint32_t current = i + 1;
+        uint32_t next = (i + 1) % segmentCount + 1;
+        mesh.indices.push_back(0);
+        mesh.indices.push_back(current);
+        mesh.indices.push_back(next);
+    }
+
+    return mesh;
+}
+
+void VulkanExample::destroyVmaAllocator() {
+    if (allocator != VK_NULL_HANDLE) {
+        vmaDestroyAllocator(allocator);
+        allocator = VK_NULL_HANDLE;
+    }
+}
+
+AllocatedBuffer VulkanExample::createAllocatedBuffer(size_t size, VkBufferUsageFlags usage,  VmaAllocationCreateFlags allocationFlags, VmaMemoryUsage memoryUsage) {
+    VkBufferCreateInfo bufferCI{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    //bufferCI.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferCI.size = size;
+    bufferCI.usage = usage;
+
+    VmaAllocationCreateInfo vmaAllocationCI{};
+    vmaAllocationCI.usage = memoryUsage;
+    vmaAllocationCI.flags = allocationFlags;
+
+    AllocatedBuffer buffer{};
+    buffer.size = size;
+
+    VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCI, &vmaAllocationCI, &buffer.handle, &buffer.allocation, &buffer.allocationInfo));
+
+    return buffer;
 }
