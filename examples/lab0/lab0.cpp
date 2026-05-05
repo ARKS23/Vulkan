@@ -8,7 +8,7 @@ VulkanExample::VulkanExample() : VulkanExampleBase() {
     camera.type = Camera::CameraType::lookat;
     camera.setPosition(glm::vec3(0.0f, 0.0f, -2.5f));
     camera.setRotation(glm::vec3(0.0f, 0.0f, 0.0f));
-    camera.setPerspective(60.0f, (float)width / (float)height, 1.0f, 256.0f);
+    camera.setPerspective(45.0f, (float)width / (float)height, 1.0f, 256.0f);
 
     apiVersion = VK_API_VERSION_1_3;
     enabledFeatures.dynamicRendering = VK_TRUE;
@@ -119,6 +119,23 @@ void VulkanExample::createVertexBuffer() {
     const uint32_t indexCount = static_cast<uint32_t>(indices.size());
     uint32_t indexBufferSize = indexCount * sizeof(uint32_t);
 
+    // staging buffer已经封装在里面
+    circleMeshBuffers.vertexBuffer = createDeviceLocalBuffer(
+        circle.vertices.data(),
+        vertexBufferSize,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+    );
+
+    circleMeshBuffers.indexBuffer = createDeviceLocalBuffer(
+        circle.indices.data(),
+        indexBufferSize,
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT
+    );
+
+    circleMeshBuffers.indexCount = indexCount;
+    circleMeshBuffers.indexType = VK_INDEX_TYPE_UINT32;
+
+#if 0
     // 经典Staging Buffer流程
     AllocatedBuffer stagingBuffer = createAllocatedBuffer(
         vertexBufferSize + indexBufferSize,
@@ -185,6 +202,7 @@ void VulkanExample::createVertexBuffer() {
     // vkDestroyBuffer(device, stagingBuffer.handle, nullptr);
     // vkFreeMemory(device, stagingBuffer.memory, nullptr);
     vmaDestroyBuffer(allocator, stagingBuffer.handle, stagingBuffer.allocation);
+#endif
 }
 
 void VulkanExample::createUniformBuffers() {
@@ -606,7 +624,6 @@ void VulkanExample::destroyVmaAllocator() {
 
 AllocatedBuffer VulkanExample::createAllocatedBuffer(size_t size, VkBufferUsageFlags usage,  VmaAllocationCreateFlags allocationFlags, VmaMemoryUsage memoryUsage) {
     VkBufferCreateInfo bufferCI{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-    //bufferCI.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferCI.size = size;
     bufferCI.usage = usage;
 
@@ -620,4 +637,53 @@ AllocatedBuffer VulkanExample::createAllocatedBuffer(size_t size, VkBufferUsageF
     VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCI, &vmaAllocationCI, &buffer.handle, &buffer.allocation, &buffer.allocationInfo));
 
     return buffer;
+}
+
+AllocatedBuffer VulkanExample::createDeviceLocalBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage) {
+    AllocatedBuffer stagingBuffer = createAllocatedBuffer(
+        size,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        VMA_MEMORY_USAGE_AUTO
+    );
+
+    void* mappedData = stagingBuffer.allocationInfo.pMappedData;
+    memcpy(mappedData, data, static_cast<size_t>(size));
+    VK_CHECK_RESULT(vmaFlushAllocation(allocator, stagingBuffer.allocation, 0, size)); // flush一下让GPU看到
+
+    AllocatedBuffer deviceBuffer = createAllocatedBuffer(size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, VMA_MEMORY_USAGE_AUTO);
+
+    VkCommandBuffer copyCmd;
+    VkCommandBufferAllocateInfo cmdCI {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    cmdCI.commandPool = commandPool;
+    cmdCI.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdCI.commandBufferCount = 1;
+    VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdCI, &copyCmd));
+
+    VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+    cmdBufInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_CHECK_RESULT(vkBeginCommandBuffer(copyCmd, &cmdBufInfo));
+    {
+        VkBufferCopy copyRegion{};
+        copyRegion.size = size;
+        vkCmdCopyBuffer(copyCmd, stagingBuffer.handle, deviceBuffer.handle, 1, &copyRegion);
+    }
+    VK_CHECK_RESULT(vkEndCommandBuffer(copyCmd));
+
+    VkSubmitInfo submitInfo {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &copyCmd;
+
+    // 提交队列执行，用fence等待GPU完成
+    VkFenceCreateInfo fenceCI{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    VkFence fence;
+    VK_CHECK_RESULT(vkCreateFence(device, &fenceCI, nullptr, &fence));
+    VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, fence));
+    VK_CHECK_RESULT(vkWaitForFences(device, 1, &fence, VK_TRUE, DEFAULT_FENCE_TIMEOUT));
+
+    vkDestroyFence(device, fence, nullptr);
+    vkFreeCommandBuffers(device, commandPool, 1, &copyCmd);
+    vmaDestroyBuffer(allocator, stagingBuffer.handle, stagingBuffer.allocation);
+
+    return deviceBuffer;
 }

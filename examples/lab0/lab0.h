@@ -98,6 +98,7 @@ public:
 
 	//helper function 稳定后加入工具函数
 	AllocatedBuffer createAllocatedBuffer(size_t allocSize, VkBufferUsageFlags usage,  VmaAllocationCreateFlags allocationFlags, VmaMemoryUsage memoryUsage);
+	AllocatedBuffer createDeviceLocalBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage); // 封装CPU上传数据到GPU
 
 private:
 	MeshData createCircleMesh(float radius, uint32_t segmentCount);
