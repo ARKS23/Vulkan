@@ -1,4 +1,5 @@
 #include "lab0.h"
+#include "vk_resources.h"
 
 
 VulkanExample::VulkanExample() : VulkanExampleBase() {
@@ -23,11 +24,11 @@ VulkanExample::~VulkanExample() {
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
         if (circleMeshBuffers.vertexBuffer.handle != VK_NULL_HANDLE) {
-            destroyAllocatedBuffer(circleMeshBuffers.vertexBuffer);
+            vkutil::destroyAllocatedBuffer(allocator, circleMeshBuffers.vertexBuffer);
         }
 
         if (circleMeshBuffers.indexBuffer.handle != VK_NULL_HANDLE) {
-            destroyAllocatedBuffer(circleMeshBuffers.indexBuffer);
+            vkutil::destroyAllocatedBuffer(allocator, circleMeshBuffers.indexBuffer);
         }
 
         vkDestroyCommandPool(device, commandPool, nullptr);
@@ -119,18 +120,10 @@ void VulkanExample::createVertexBuffer() {
     const uint32_t indexCount = static_cast<uint32_t>(indices.size());
     uint32_t indexBufferSize = indexCount * sizeof(uint32_t);
 
-    // staging buffer已经封装在里面
-    circleMeshBuffers.vertexBuffer = createDeviceLocalBuffer(
-        circle.vertices.data(),
-        vertexBufferSize,
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
-    );
-
-    circleMeshBuffers.indexBuffer = createDeviceLocalBuffer(
-        circle.indices.data(),
-        indexBufferSize,
-        VK_BUFFER_USAGE_INDEX_BUFFER_BIT
-    );
+    // 处理顶点数据和索引数据的上传
+    vkutil::ImmediateSubmitContext submitContext{device, queue, commandPool };
+    circleMeshBuffers.vertexBuffer = vkutil::createDeviceLocalBuffer(allocator, submitContext, circle.vertices.data(), vertexBufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    circleMeshBuffers.indexBuffer = vkutil::createDeviceLocalBuffer(allocator, submitContext, circle.indices.data(), indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 
     circleMeshBuffers.indexCount = indexCount;
     circleMeshBuffers.indexType = VK_INDEX_TYPE_UINT32;
@@ -551,86 +544,4 @@ void VulkanExample::destroyVmaAllocator() {
         vmaDestroyAllocator(allocator);
         allocator = VK_NULL_HANDLE;
     }
-}
-
-AllocatedBuffer VulkanExample::createAllocatedBuffer(size_t size, VkBufferUsageFlags usage,  VmaAllocationCreateFlags allocationFlags, VmaMemoryUsage memoryUsage) {
-    VkBufferCreateInfo bufferCI{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-    bufferCI.size = size;
-    bufferCI.usage = usage;
-
-    VmaAllocationCreateInfo vmaAllocationCI{};
-    vmaAllocationCI.usage = memoryUsage;
-    vmaAllocationCI.flags = allocationFlags;
-
-    AllocatedBuffer buffer{};
-    buffer.size = size;
-
-    VK_CHECK_RESULT(vmaCreateBuffer(allocator, &bufferCI, &vmaAllocationCI, &buffer.handle, &buffer.allocation, &buffer.allocationInfo));
-
-    return buffer;
-}
-
-AllocatedBuffer VulkanExample::createDeviceLocalBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage) {
-    AllocatedBuffer stagingBuffer = createAllocatedBuffer(
-        size,
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
-        VMA_MEMORY_USAGE_AUTO
-    );
-
-    void* mappedData = stagingBuffer.allocationInfo.pMappedData;
-    memcpy(mappedData, data, static_cast<size_t>(size));
-    VK_CHECK_RESULT(vmaFlushAllocation(allocator, stagingBuffer.allocation, 0, size)); // flush一下让GPU看到
-
-    AllocatedBuffer deviceBuffer = createAllocatedBuffer(size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, VMA_MEMORY_USAGE_AUTO);
-
-    // 封装提交函数，用&捕获，因为要访问size, staging buffer, device buffer
-    immediateSubmit([&](VkCommandBuffer cmd) {
-        VkBufferCopy copyRegion{};
-        copyRegion.size = size;
-        vkCmdCopyBuffer(cmd, stagingBuffer.handle, deviceBuffer.handle, 1, &copyRegion);
-    });
-
-    destroyAllocatedBuffer(stagingBuffer);
-
-    return deviceBuffer;
-}
-
-void VulkanExample::destroyAllocatedBuffer(AllocatedBuffer& buffer) {
-    if (buffer.handle != VK_NULL_HANDLE) {
-        vmaDestroyBuffer(allocator, buffer.handle, buffer.allocation);
-        buffer.handle = VK_NULL_HANDLE;
-        buffer.allocation = VK_NULL_HANDLE;
-        buffer.allocationInfo = {};
-        buffer.size = 0;
-    }
-}
-
-void VulkanExample::immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function) {
-    VkCommandBuffer copyCmd;
-    VkCommandBufferAllocateInfo cmdCI {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    cmdCI.commandPool = commandPool;
-    cmdCI.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmdCI.commandBufferCount = 1;
-    VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdCI, &copyCmd));
-
-    VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-    cmdBufInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    VK_CHECK_RESULT(vkBeginCommandBuffer(copyCmd, &cmdBufInfo));
-    function(copyCmd); // 核心单挑指令
-    VK_CHECK_RESULT(vkEndCommandBuffer(copyCmd));
-
-    VkSubmitInfo submitInfo {VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &copyCmd;
-
-    // 提交队列执行，用fence等待GPU完成
-    VkFenceCreateInfo fenceCI{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-    VkFence fence;
-    VK_CHECK_RESULT(vkCreateFence(device, &fenceCI, nullptr, &fence));
-    VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, fence));
-    VK_CHECK_RESULT(vkWaitForFences(device, 1, &fence, VK_TRUE, DEFAULT_FENCE_TIMEOUT));
-
-    vkDestroyFence(device, fence, nullptr);
-    vkFreeCommandBuffers(device, commandPool, 1, &copyCmd);
 }

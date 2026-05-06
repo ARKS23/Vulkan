@@ -77,7 +77,7 @@ public:
     virtual void getEnabledFeatures() override;
     uint32_t getMemoryTypeIndex(uint32_t typeBits, VkMemoryPropertyFlags properties);
 
-	void createVmaAllocator();
+	void createVmaAllocator();	// 等稳定后加入基类
     void createSynchronizationPrimitives();
     void createCommandBuffers();
     void createVertexBuffer();
@@ -95,13 +95,7 @@ public:
 	void setupFrameBuffer() override {}
 	void setupRenderPass() override {}
 
-	void destroyVmaAllocator();
-
-	//helper function 稳定后加入工具函数
-	AllocatedBuffer createAllocatedBuffer(size_t allocSize, VkBufferUsageFlags usage,  VmaAllocationCreateFlags allocationFlags, VmaMemoryUsage memoryUsage);
-	AllocatedBuffer createDeviceLocalBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage); // 封装CPU上传数据到GPU
-	void destroyAllocatedBuffer(AllocatedBuffer& buffer);
-	void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function);
+	void destroyVmaAllocator(); // 等稳定后加入基类
 
 private:
 	MeshData createCircleMesh(float radius, uint32_t segmentCount);
