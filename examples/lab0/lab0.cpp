@@ -185,9 +185,17 @@ void VulkanExample::createDescriptors() {
 }
 
 void VulkanExample::createPipeline() {
+    // 补充 push constants
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(PushConstantData);
+
     VkPipelineLayoutCreateInfo pipelineLayoutCI = vkinit::pipelineLayoutCreateInfo();
     pipelineLayoutCI.setLayoutCount = 1;
     pipelineLayoutCI.pSetLayouts = &descriptorSetLayout;
+    pipelineLayoutCI.pushConstantRangeCount = 1;
+    pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
     VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
 
     VkGraphicsPipelineCreateInfo pipelineCI{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
@@ -266,14 +274,14 @@ void VulkanExample::createPipeline() {
     // vertex
     shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    shaderStages[0].module = loadSPIRVShader(getShadersPath() + "triangle/triangle.vert.spv");
+    shaderStages[0].module = loadSPIRVShader(getShadersPath() + vertShaderPath);
     shaderStages[0].pName = "main";
     assert(shaderStages[0].module != VK_NULL_HANDLE);
 
     // fragment
     shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    shaderStages[1].module = loadSPIRVShader(getShadersPath() + "triangle/triangle.frag.spv");
+    shaderStages[1].module = loadSPIRVShader(getShadersPath() + fragShaderPath);
     shaderStages[1].pName = "main";
     assert(shaderStages[1].module != VK_NULL_HANDLE);
 
@@ -380,6 +388,11 @@ void VulkanExample::render() {
 		
 		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
+        // push constants
+        PushConstantData pushConstantData{};
+        pushConstantData.colorMultiplier = glm::vec4(1.0f, 1.0f, 0.5f, 1.0f);
+        vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstantData), &pushConstantData);
+        
         VkDeviceSize offsets[1]{ 0 };
 		vkCmdBindVertexBuffers(commandBuffer, 0, 1, &circleMeshBuffers.vertexBuffer.handle, offsets);
 		

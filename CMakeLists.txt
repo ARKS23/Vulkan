@@ -25,6 +25,12 @@ OPTION(USE_RELATIVE_ASSET_PATH "Load assets (shaders, models, textures) from a f
 OPTION(FORCE_VALIDATION "Forces validation on for all samples at compile time (prefer using the -v / --validation command line arguments)" OFF)
 
 set(RESOURCE_INSTALL_DIR "" CACHE PATH "Path to install resources to (leave empty for running uninstalled)")
+set(VK_EXAMPLE_DEFAULT_SHADER_DIR "hlsl" CACHE STRING "Default shader source directory to load SPIR-V from: glsl, hlsl or slang")
+set_property(CACHE VK_EXAMPLE_DEFAULT_SHADER_DIR PROPERTY STRINGS "glsl" "hlsl" "slang")
+if (NOT VK_EXAMPLE_DEFAULT_SHADER_DIR MATCHES "^(glsl|hlsl|slang)$")
+	message(FATAL_ERROR "VK_EXAMPLE_DEFAULT_SHADER_DIR must be one of: glsl, hlsl or slang")
+endif()
+add_definitions(-DVK_EXAMPLE_DEFAULT_SHADER_DIR=\"${VK_EXAMPLE_DEFAULT_SHADER_DIR}\")
 
 message(STATUS "Using module to find Vulkan")
 find_package(Vulkan)

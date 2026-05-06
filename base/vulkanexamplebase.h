@@ -92,7 +92,10 @@ private:
 	void createSwapChain();
 	void createCommandBuffers();
 	void destroyCommandBuffers();
-	std::string shaderDir = "glsl";
+#if !defined(VK_EXAMPLE_DEFAULT_SHADER_DIR)
+#define VK_EXAMPLE_DEFAULT_SHADER_DIR "glsl"
+#endif
+	std::string shaderDir = VK_EXAMPLE_DEFAULT_SHADER_DIR;
 protected:
 	// Returns the path to the root of the glsl, hlsl or slang shader directory.
 	std::string getShadersPath() const;

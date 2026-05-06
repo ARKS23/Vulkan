@@ -810,7 +810,7 @@ VulkanExampleBase::VulkanExampleBase()
 		settings.fullscreen = true;
 	}
 	if (commandLineParser.isSet("shaders")) {
-		std::string value = commandLineParser.getValueAsString("shaders", "glsl");
+		std::string value = commandLineParser.getValueAsString("shaders", shaderDir);
 		if ((value != "glsl") && (value != "hlsl") && (value != "slang")) {
 			std::cerr << "Shader type must be one of 'glsl', 'hlsl' or 'slang'\n";
 		}

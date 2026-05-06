@@ -43,6 +43,10 @@ public:
         glm::mat4 viewMatrix;
     };
 
+	struct PushConstantData {
+		glm::vec4 colorMultiplier {1.0f, 1.0f, 1.0f, 1.0f};
+	};
+
     struct MeshData {
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
@@ -100,6 +104,9 @@ public:
 
 private:
 	MeshData createCircleMesh(float radius, uint32_t segmentCount);
+
+	const std::string vertShaderPath = "lab0/lab0.vert.spv";
+	const std::string fragShaderPath = "lab0/lab0.frag.spv";
 };
 
 
