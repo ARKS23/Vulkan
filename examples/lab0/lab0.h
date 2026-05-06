@@ -31,10 +31,11 @@ public:
 		VkBuffer handle{ VK_NULL_HANDLE };
     };
 
-    struct UniformBuffer : VulkanBuffer {
-        VkDescriptorSet descriptorSet{ VK_NULL_HANDLE };
-        uint8_t* mapped{ nullptr }; // 映射后的指针，方便后面直接通过 memcpy 更新内容
-    };
+	struct UniformBufferV2 {
+		AllocatedBuffer buffer;
+		VkDescriptorSet descriptorSet{ VK_NULL_HANDLE };
+		uint8_t* mapped { nullptr };
+	};
 
     struct ShaderData {
         glm::mat4 projectionMatrix;
@@ -50,7 +51,7 @@ public:
 public:
 	GPUMeshBuffers circleMeshBuffers;
 
-    std::array<UniformBuffer, MAX_CONCURRENT_FRAMES> uniformBuffers; // 每个 in-flight frame 对应一份 UBO
+	std::array<UniformBufferV2, MAX_CONCURRENT_FRAMES> uniformBuffersV2; // 每个 in-flight frame 对应一份 UBO
 
     VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
 

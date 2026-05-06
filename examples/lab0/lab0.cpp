@@ -41,8 +41,8 @@ VulkanExample::~VulkanExample() {
         }
         for (uint32_t i = 0; i < MAX_CONCURRENT_FRAMES; i++) {
             vkDestroyFence(device, waitFences[i], nullptr);
-            vkDestroyBuffer(device, uniformBuffers[i].handle, nullptr);
-            vkFreeMemory(device, uniformBuffers[i].memory, nullptr);
+            vkutil::destroyAllocatedBuffer(allocator, uniformBuffersV2[i].buffer);
+            uniformBuffersV2[i].mapped = nullptr;
         }
 
         destroyVmaAllocator();
@@ -130,20 +130,13 @@ void VulkanExample::createVertexBuffer() {
 }
 
 void VulkanExample::createUniformBuffers() {
-    VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-    bufferInfo.size = sizeof(ShaderData);
-    bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-
     for (uint32_t i = 0; i < MAX_CONCURRENT_FRAMES; i++) {
-        VK_CHECK_RESULT(vkCreateBuffer(device, &bufferInfo, nullptr, &uniformBuffers[i].handle));
-        VkMemoryRequirements memReqs;
-        vkGetBufferMemoryRequirements(device, uniformBuffers[i].handle, &memReqs);
-        VkMemoryAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-        allocInfo.allocationSize = memReqs.size;
-        allocInfo.memoryTypeIndex = getMemoryTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-        VK_CHECK_RESULT(vkAllocateMemory(device, &allocInfo, nullptr, &(uniformBuffers[i].memory)));
-        VK_CHECK_RESULT(vkBindBufferMemory(device, uniformBuffers[i].handle, uniformBuffers[i].memory, 0));
-        VK_CHECK_RESULT(vkMapMemory(device, uniformBuffers[i].memory, 0, sizeof(ShaderData), 0, (void**)&uniformBuffers[i].mapped));
+        uniformBuffersV2[i].buffer = vkutil::createAllocatedBuffer(allocator, sizeof(ShaderData), 
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+            VMA_MEMORY_USAGE_AUTO
+        );
+        uniformBuffersV2[i].mapped = static_cast<uint8_t*>(uniformBuffersV2[i].buffer.allocationInfo.pMappedData);
     }
 }
 
@@ -173,15 +166,16 @@ void VulkanExample::createDescriptors() {
         allocInfo.descriptorPool = descriptorPool;
         allocInfo.descriptorSetCount = 1;
         allocInfo.pSetLayouts = &descriptorSetLayout;
-        VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &uniformBuffers[i].descriptorSet));
+        VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &uniformBuffersV2[i].descriptorSet));
 
         VkWriteDescriptorSet writeDescriptorSet{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
 
         VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = uniformBuffers[i].handle;
+        bufferInfo.buffer = uniformBuffersV2[i].buffer.handle;
+        bufferInfo.offset = 0;
         bufferInfo.range = sizeof(ShaderData);
 
-        writeDescriptorSet.dstSet = uniformBuffers[i].descriptorSet;
+        writeDescriptorSet.dstSet = uniformBuffersV2[i].descriptorSet;
         writeDescriptorSet.descriptorCount = 1;
         writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         writeDescriptorSet.pBufferInfo = &bufferInfo;
@@ -341,7 +335,8 @@ void VulkanExample::render() {
     static float rotation{ 0.0f };
     //rotation += 0.05f;
     shaderData.modelMatrix = glm::rotate(glm::mat4(1.f), glm::radians(rotation), glm::vec3(1.0f, 0.0f, 0.0f));
-    memcpy(uniformBuffers[currentFrame].mapped, &shaderData, sizeof(ShaderData));
+    memcpy(uniformBuffersV2[currentFrame].mapped, &shaderData, sizeof(ShaderData));
+    VK_CHECK_RESULT(vmaFlushAllocation(allocator, uniformBuffersV2[currentFrame].buffer.allocation, 0, sizeof(ShaderData)));
 
     vkResetCommandBuffer(commandBuffers[currentFrame], 0);
     VkCommandBufferBeginInfo cmdBufInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
@@ -381,7 +376,7 @@ void VulkanExample::render() {
         VkRect2D scissor{ 0, 0, width, height };
 		vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &uniformBuffers[currentFrame].descriptorSet, 0, nullptr);
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &uniformBuffersV2[currentFrame].descriptorSet, 0, nullptr);
 		
 		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
