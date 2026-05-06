@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <fstream>
 #include <vector>
+#include <functional>
 #include <exception>
 
 #define GLM_FORCE_RADIANS
@@ -99,143 +100,12 @@ public:
 	//helper function 稳定后加入工具函数
 	AllocatedBuffer createAllocatedBuffer(size_t allocSize, VkBufferUsageFlags usage,  VmaAllocationCreateFlags allocationFlags, VmaMemoryUsage memoryUsage);
 	AllocatedBuffer createDeviceLocalBuffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage); // 封装CPU上传数据到GPU
+	void destroyAllocatedBuffer(AllocatedBuffer& buffer);
+	void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function);
 
 private:
 	MeshData createCircleMesh(float radius, uint32_t segmentCount);
 };
 
 
-#if defined(_WIN32)
-// Windows 入口
-VulkanExample *vulkanExample;
-LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
-{
-	if (vulkanExample != NULL)
-	{
-		vulkanExample->handleMessages(hWnd, uMsg, wParam, lParam);
-	}
-	return (DefWindowProc(hWnd, uMsg, wParam, lParam));
-}
-int APIENTRY WinMain(_In_ HINSTANCE hInstance, _In_opt_  HINSTANCE hPrevInstance, _In_ LPSTR, _In_ int)
-{
-	for (size_t i = 0; i < __argc; i++) { VulkanExample::args.push_back(__argv[i]); };
-	vulkanExample = new VulkanExample();
-	vulkanExample->initVulkan();
-	vulkanExample->setupWindow(hInstance, WndProc);
-	vulkanExample->prepare();
-	vulkanExample->renderLoop();
-	delete(vulkanExample);
-	return 0;
-}
-
-#elif defined(__ANDROID__)
-// Android 入口
-VulkanExample *vulkanExample;
-void android_main(android_app* state)
-{
-	vulkanExample = new VulkanExample();
-	state->userData = vulkanExample;
-	state->onAppCmd = VulkanExample::handleAppCommand;
-	state->onInputEvent = VulkanExample::handleAppInput;
-	androidApp = state;
-	vulkanExample->renderLoop();
-	delete(vulkanExample);
-}
-#elif defined(_DIRECT2DISPLAY)
-
-// Linux 入口（Direct to Display WSI）
-// D2D 常用于嵌入式平台
-VulkanExample *vulkanExample;
-static void handleEvent()
-{
-}
-int main(const int argc, const char *argv[])
-{
-	for (size_t i = 0; i < argc; i++) { VulkanExample::args.push_back(argv[i]); };
-	vulkanExample = new VulkanExample();
-	vulkanExample->initVulkan();
-	vulkanExample->prepare();
-	vulkanExample->renderLoop();
-	delete(vulkanExample);
-	return 0;
-}
-#elif defined(VK_USE_PLATFORM_DIRECTFB_EXT)
-VulkanExample *vulkanExample;
-static void handleEvent(const DFBWindowEvent *event)
-{
-	if (vulkanExample != NULL)
-	{
-		vulkanExample->handleEvent(event);
-	}
-}
-int main(const int argc, const char *argv[])
-{
-	for (size_t i = 0; i < argc; i++) { VulkanExample::args.push_back(argv[i]); };
-	vulkanExample = new VulkanExample();
-	vulkanExample->initVulkan();
-	vulkanExample->setupWindow();
-	vulkanExample->prepare();
-	vulkanExample->renderLoop();
-	delete(vulkanExample);
-	return 0;
-}
-#elif defined(VK_USE_PLATFORM_WAYLAND_KHR)
-VulkanExample *vulkanExample;
-int main(const int argc, const char *argv[])
-{
-	for (size_t i = 0; i < argc; i++) { VulkanExample::args.push_back(argv[i]); };
-	vulkanExample = new VulkanExample();
-	vulkanExample->initVulkan();
-	vulkanExample->setupWindow();
-	vulkanExample->prepare();
-	vulkanExample->renderLoop();
-	delete(vulkanExample);
-	return 0;
-}
-#elif defined(__linux__) || defined(__FreeBSD__)
-
-// Linux 入口
-VulkanExample *vulkanExample;
-#if defined(VK_USE_PLATFORM_XCB_KHR)
-static void handleEvent(const xcb_generic_event_t *event)
-{
-	if (vulkanExample != NULL)
-	{
-		vulkanExample->handleEvent(event);
-	}
-}
-#else
-static void handleEvent()
-{
-}
-#endif
-int main(const int argc, const char *argv[])
-{
-	for (size_t i = 0; i < argc; i++) { VulkanExample::args.push_back(argv[i]); };
-	vulkanExample = new VulkanExample();
-	vulkanExample->initVulkan();
-	vulkanExample->setupWindow();
-	vulkanExample->prepare();
-	vulkanExample->renderLoop();
-	delete(vulkanExample);
-	return 0;
-}
-#elif (defined(VK_USE_PLATFORM_MACOS_MVK) || defined(VK_USE_PLATFORM_METAL_EXT)) && defined(VK_EXAMPLE_XCODE_GENERATED)
-VulkanExample *vulkanExample;
-int main(const int argc, const char *argv[])
-{
-	@autoreleasepool
-	{
-		for (size_t i = 0; i < argc; i++) { VulkanExample::args.push_back(argv[i]); };
-		vulkanExample = new VulkanExample();
-		vulkanExample->initVulkan();
-		vulkanExample->setupWindow(nullptr);
-		vulkanExample->prepare();
-		vulkanExample->renderLoop();
-		delete(vulkanExample);
-	}
-	return 0;
-}
-#elif defined(VK_USE_PLATFORM_SCREEN_QNX)
 VULKAN_EXAMPLE_MAIN()
-#endif
