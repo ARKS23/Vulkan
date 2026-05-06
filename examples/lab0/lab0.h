@@ -44,6 +44,7 @@ public:
     };
 
 	struct PushConstantData {
+		glm::mat4 modelMatrix;
 		glm::vec4 colorMultiplier {1.0f, 1.0f, 1.0f, 1.0f};
 	};
 

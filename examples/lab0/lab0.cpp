@@ -187,7 +187,7 @@ void VulkanExample::createDescriptors() {
 void VulkanExample::createPipeline() {
     // 补充 push constants
     VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT;
     pushConstantRange.offset = 0;
     pushConstantRange.size = sizeof(PushConstantData);
 
@@ -390,8 +390,9 @@ void VulkanExample::render() {
 
         // push constants
         PushConstantData pushConstantData{};
+        pushConstantData.modelMatrix = shaderData.modelMatrix;
         pushConstantData.colorMultiplier = glm::vec4(1.0f, 1.0f, 0.5f, 1.0f);
-        vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstantData), &pushConstantData);
+        vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstantData), &pushConstantData);
         
         VkDeviceSize offsets[1]{ 0 };
 		vkCmdBindVertexBuffers(commandBuffer, 0, 1, &circleMeshBuffers.vertexBuffer.handle, offsets);
@@ -399,6 +400,12 @@ void VulkanExample::render() {
 		vkCmdBindIndexBuffer(commandBuffer, circleMeshBuffers.indexBuffer.handle, 0, circleMeshBuffers.indexType);
 		
 		vkCmdDrawIndexed(commandBuffer, circleMeshBuffers.indexCount, 1, 0, 0, 0);
+
+        // per draw push constants update
+        pushConstantData.modelMatrix = glm::translate(pushConstantData.modelMatrix, glm::vec3(1.5f, 1.5f, 2.0f));
+        pushConstantData.colorMultiplier = glm::vec4(0.5f, 2.0f, 1.0f, 1.0f);
+        vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstantData), &pushConstantData);
+        vkCmdDrawIndexed(commandBuffer, circleMeshBuffers.indexCount, 1, 0, 0, 0);
 		
 		vkCmdEndRendering(commandBuffer);
 

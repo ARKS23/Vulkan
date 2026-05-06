@@ -21,10 +21,17 @@ struct VSOutput
 [[vk::location(0)]] float3 Color : COLOR0;
 };
 
+struct PushConstants {
+  float4x4 modelMatrix;
+  float4 ColorMultiplier;
+};
+
+[[vk::push_constant]] PushConstants pushConstants;
+
 VSOutput main(VSInput input)
 {
 	VSOutput output = (VSOutput)0;
 	output.Color = input.Color;
-	output.Pos = mul(ubo.projectionMatrix, mul(ubo.viewMatrix, mul(ubo.modelMatrix, float4(input.Pos.xyz, 1.0))));
+	output.Pos = mul(ubo.projectionMatrix, mul(ubo.viewMatrix, mul(pushConstants.modelMatrix, float4(input.Pos.xyz, 1.0))));
 	return output;
 }
