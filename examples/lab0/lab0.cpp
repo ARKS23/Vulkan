@@ -23,7 +23,8 @@ VulkanExample::~VulkanExample() {
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
-        colorTexture.destroy();
+        //colorTexture.destroy();
+        vkutil::destroyTexture(device, allocator, baseColorTexture);
 
         if (circleMeshBuffers.vertexBuffer.handle != VK_NULL_HANDLE) {
             vkutil::destroyAllocatedBuffer(allocator, circleMeshBuffers.vertexBuffer);
@@ -182,7 +183,7 @@ void VulkanExample::createDescriptors() {
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(ShaderData);
 
-        VkDescriptorImageInfo imageInfo = colorTexture.descriptor;
+        VkDescriptorImageInfo imageInfo = baseColorTexture.descriptor;
 
         std::array<VkWriteDescriptorSet, 2> writeDescriptorSets{};
         writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -593,11 +594,26 @@ void VulkanExample::destroyVmaAllocator() {
 }
 
 void VulkanExample::loadTexture() {
-    // 项目原有的helper
-    colorTexture.loadFromFile(
-        getAssetPath() + "textures/metalplate01_rgba.ktx",
-        VK_FORMAT_R8G8B8A8_UNORM,
-        vulkanDevice,
-        queue
-    );
+    constexpr uint32_t textureWidth = 256;
+    constexpr uint32_t textureHeight = 256;
+    constexpr uint32_t channelCount = 4;
+    constexpr uint32_t checkerSize = 32;
+
+    std::vector<uint8_t> pixels(textureWidth * textureHeight * channelCount);
+    for (uint32_t y = 0; y < textureHeight; y++) {
+        for (uint32_t x = 0; x < textureWidth; x++) {
+            const bool checker =
+            ((x / checkerSize) + (y / checkerSize)) % 2 == 0;
+            const size_t pixelIndex = static_cast<size_t>(y * textureWidth + x) * channelCount;
+            pixels[pixelIndex + 0] = checker ? 230 : 35;
+            pixels[pixelIndex + 1] = checker ? 210 : 45;
+            pixels[pixelIndex + 2] = checker ? 90 : 120;
+            pixels[pixelIndex + 3] = 255;
+        }
+    }
+
+    vkutil::ImmediateSubmitContext submitContext{device, queue, commandPool };
+
+
+    baseColorTexture = vkutil::createTexture2DFromPixels(device ,allocator, submitContext, pixels.data(), textureWidth, textureHeight, VK_FORMAT_R8G8B8A8_UNORM);
 }

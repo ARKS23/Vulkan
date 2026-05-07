@@ -8,6 +8,8 @@ namespace vkutil {
         VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
         bufferInfo.size = size;
         bufferInfo.usage = usage;
+
+        // VMA 负责选择 memory type、分配显存/内存，并完成 buffer 与 allocation 的绑定。
         VmaAllocationCreateInfo allocationInfo{};
         allocationInfo.usage = memoryUsage;
         allocationInfo.flags = allocationFlags;
@@ -29,13 +31,15 @@ namespace vkutil {
     }
 
     AllocatedBuffer createDeviceLocalBuffer(VmaAllocator allocator, const ImmediateSubmitContext& submitContext, const void* data, VkDeviceSize size, VkBufferUsageFlags usage) {
+        // staging buffer 对 CPU 可见，用来临时接收上传数据；最终 buffer 保持 device-local，供 GPU 高效读取。
         AllocatedBuffer stagingBuffer = createAllocatedBuffer(allocator, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, VMA_MEMORY_USAGE_AUTO);
 
         std::memcpy(stagingBuffer.allocationInfo.pMappedData, data, static_cast<size_t>(size));
         vmaFlushAllocation(allocator, stagingBuffer.allocation, 0, size);
 
         AllocatedBuffer deviceBuffer = createAllocatedBuffer(allocator, size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, VMA_MEMORY_USAGE_AUTO);
-            immediateSubmit(submitContext, [&](VkCommandBuffer cmd) {
+        immediateSubmit(submitContext, [&](VkCommandBuffer cmd) {
+            // immediateSubmit 会同步等待 copy 完成，因此函数返回前 staging buffer 可以安全释放。
             VkBufferCopy copyRegion{};
             copyRegion.size = size;
             vkCmdCopyBuffer(cmd, stagingBuffer.handle, deviceBuffer.handle, 1, &copyRegion);

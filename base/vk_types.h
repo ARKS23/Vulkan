@@ -18,16 +18,40 @@
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
 
+// 由 VMA 管理内存的 Buffer 包装。
+// 这里只保存资源句柄和分配信息，释放时统一走 vkutil::destroyAllocatedBuffer。
 struct AllocatedBuffer {
-    VkBuffer handle{ VK_NULL_HANDLE };          // buffer句柄
-    VmaAllocation allocation{ VK_NULL_HANDLE }; // vma分配句柄
-    VmaAllocationInfo allocationInfo{};         // 分配信息，包含内存类型、大小、映射指针等
-    VkDeviceSize size{ 0 };                     // buffer大小，单位字节
+    VkBuffer handle{ VK_NULL_HANDLE };
+    VmaAllocation allocation{ VK_NULL_HANDLE };
+    VmaAllocationInfo allocationInfo{};
+    VkDeviceSize size{ 0 };
 };
 
+// GPU 侧 mesh 数据。
+// 目前采用 vertex buffer + index buffer 的经典组合，适合 vkCmdDrawIndexed。
 struct GPUMeshBuffers {
-    AllocatedBuffer vertexBuffer; // 顶点缓冲
-    AllocatedBuffer indexBuffer;  // 索引缓冲
-    uint32_t indexCount{ 0 };    // 索引数量
-    VkIndexType indexType{ VK_INDEX_TYPE_UINT32 }; // 索引类型，默认为32位无符号整数
+    AllocatedBuffer vertexBuffer;
+    AllocatedBuffer indexBuffer;
+    uint32_t indexCount{ 0 };
+    VkIndexType indexType{ VK_INDEX_TYPE_UINT32 };
+};
+
+// 由 VMA 管理内存的 Image 包装，并默认持有一个 2D ImageView。
+// 保持通用：它既可以表示普通纹理，也可以表示 depth image、shadow map、offscreen render target。
+struct AllocatedImage {
+    VkImage image{ VK_NULL_HANDLE };
+    VkImageView imageView{ VK_NULL_HANDLE };
+    VmaAllocation allocation{ VK_NULL_HANDLE };
+    VmaAllocationInfo allocationInfo{};
+    VkExtent3D extent{};
+    VkFormat format{ VK_FORMAT_UNDEFINED };
+    VkImageLayout layout{ VK_IMAGE_LAYOUT_UNDEFINED };
+};
+
+// 可被 shader 采样的 2D 纹理。
+// 在 AllocatedImage 之上补充 sampler 和 descriptor，方便 descriptor set 写入时直接使用。
+struct AllocatedTexture {
+    AllocatedImage image;
+    VkSampler sampler{ VK_NULL_HANDLE };
+    VkDescriptorImageInfo descriptor{};
 };

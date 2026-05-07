@@ -17,6 +17,7 @@
 
 #include "vk_initializers.h"
 #include "VulkanTexture.h"
+#include "vk_images.h"
 
 constexpr auto MAX_CONCURRENT_FRAMES = 2;
 
@@ -69,7 +70,7 @@ public:
 	std::vector<VkSemaphore> renderCompleteSemaphores{};
     std::array<VkFence, MAX_CONCURRENT_FRAMES> waitFences{};
 
-	vks::Texture2D colorTexture;
+	AllocatedTexture baseColorTexture;
 
     VkCommandPool commandPool{ VK_NULL_HANDLE };
 	std::array<VkCommandBuffer, MAX_CONCURRENT_FRAMES> commandBuffers{};
