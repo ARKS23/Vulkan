@@ -16,6 +16,7 @@
 #include "vulkanexamplebase.h"
 
 #include "vk_initializers.h"
+#include "VulkanTexture.h"
 
 constexpr auto MAX_CONCURRENT_FRAMES = 2;
 
@@ -24,6 +25,7 @@ public:
     struct Vertex {
 		float position[3];
 		float color[3];
+		float uv[2];
 	};
 
     struct VulkanBuffer {
@@ -67,6 +69,8 @@ public:
 	std::vector<VkSemaphore> renderCompleteSemaphores{};
     std::array<VkFence, MAX_CONCURRENT_FRAMES> waitFences{};
 
+	vks::Texture2D colorTexture;
+
     VkCommandPool commandPool{ VK_NULL_HANDLE };
 	std::array<VkCommandBuffer, MAX_CONCURRENT_FRAMES> commandBuffers{};
 
@@ -96,6 +100,7 @@ public:
 
     virtual void setupDepthStencil() override;
     VkShaderModule loadSPIRVShader(const std::string& filename);
+	void loadTexture();
 
     // dynamic render不需要这两个了，这里把它们重写成空实现，否则基类会按传统路径去创建 framebuffer 和 render pass
 	void setupFrameBuffer() override {}

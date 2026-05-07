@@ -23,6 +23,8 @@ VulkanExample::~VulkanExample() {
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
+        colorTexture.destroy();
+
         if (circleMeshBuffers.vertexBuffer.handle != VK_NULL_HANDLE) {
             vkutil::destroyAllocatedBuffer(allocator, circleMeshBuffers.vertexBuffer);
         }
@@ -141,24 +143,31 @@ void VulkanExample::createUniformBuffers() {
 }
 
 void VulkanExample::createDescriptors() {
-    VkDescriptorPoolSize descriptorTypeCounts[1]{};
+    VkDescriptorPoolSize descriptorTypeCounts[2]{};
     descriptorTypeCounts[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     descriptorTypeCounts[0].descriptorCount = MAX_CONCURRENT_FRAMES;
+    descriptorTypeCounts[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descriptorTypeCounts[1].descriptorCount = MAX_CONCURRENT_FRAMES;
 
     VkDescriptorPoolCreateInfo descriptorPoolCI{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-    descriptorPoolCI.poolSizeCount = 1;
+    descriptorPoolCI.poolSizeCount = 2;
     descriptorPoolCI.pPoolSizes = descriptorTypeCounts;
     descriptorPoolCI.maxSets = MAX_CONCURRENT_FRAMES;
 	VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolCI, nullptr, &descriptorPool));
 
-    VkDescriptorSetLayoutBinding layoutBinding{};
-    layoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    layoutBinding.descriptorCount = 1;
-    layoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    std::array<VkDescriptorSetLayoutBinding, 2> layoutBindings{};
+    layoutBindings[0].binding = 0;
+    layoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    layoutBindings[0].descriptorCount = 1;
+    layoutBindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    layoutBindings[1].binding = 1;
+    layoutBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    layoutBindings[1].descriptorCount = 1;
+    layoutBindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
     VkDescriptorSetLayoutCreateInfo descriptorLayoutCI{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    descriptorLayoutCI.bindingCount = 1;
-    descriptorLayoutCI.pBindings = &layoutBinding;
+    descriptorLayoutCI.bindingCount = static_cast<uint32_t>(layoutBindings.size());
+    descriptorLayoutCI.pBindings = layoutBindings.data();
     VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayoutCI, nullptr, &descriptorSetLayout));
 
     for (uint32_t i = 0; i < MAX_CONCURRENT_FRAMES; i++) {
@@ -168,19 +177,34 @@ void VulkanExample::createDescriptors() {
         allocInfo.pSetLayouts = &descriptorSetLayout;
         VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &uniformBuffersV2[i].descriptorSet));
 
-        VkWriteDescriptorSet writeDescriptorSet{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-
         VkDescriptorBufferInfo bufferInfo{};
         bufferInfo.buffer = uniformBuffersV2[i].buffer.handle;
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(ShaderData);
 
-        writeDescriptorSet.dstSet = uniformBuffersV2[i].descriptorSet;
-        writeDescriptorSet.descriptorCount = 1;
-        writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writeDescriptorSet.pBufferInfo = &bufferInfo;
-        writeDescriptorSet.dstBinding = 0;
-        vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
+        VkDescriptorImageInfo imageInfo = colorTexture.descriptor;
+
+        std::array<VkWriteDescriptorSet, 2> writeDescriptorSets{};
+        writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writeDescriptorSets[0].dstSet = uniformBuffersV2[i].descriptorSet;
+        writeDescriptorSets[0].dstBinding = 0;
+        writeDescriptorSets[0].descriptorCount = 1;
+        writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writeDescriptorSets[0].pBufferInfo = &bufferInfo;
+        writeDescriptorSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writeDescriptorSets[1].dstSet = uniformBuffersV2[i].descriptorSet;
+        writeDescriptorSets[1].dstBinding = 1;
+        writeDescriptorSets[1].descriptorCount = 1;
+        writeDescriptorSets[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writeDescriptorSets[1].pImageInfo = &imageInfo;
+
+        vkUpdateDescriptorSets(
+            device, 
+            static_cast<uint32_t>(writeDescriptorSets.size()), 
+            writeDescriptorSets.data(), 
+            0, 
+            nullptr
+        );
     }
 }
 
@@ -254,7 +278,7 @@ void VulkanExample::createPipeline() {
     vertexInputBinding.binding = 0;
     vertexInputBinding.stride = sizeof(Vertex);
     vertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    std::array<VkVertexInputAttributeDescription, 2> vertexInputAttributs{};
+    std::array<VkVertexInputAttributeDescription, 3> vertexInputAttributs{};
     vertexInputAttributs[0].binding = 0;
     vertexInputAttributs[0].location = 0;
     vertexInputAttributs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
@@ -263,10 +287,14 @@ void VulkanExample::createPipeline() {
     vertexInputAttributs[1].location = 1;
     vertexInputAttributs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
     vertexInputAttributs[1].offset = offsetof(Vertex, color);
+    vertexInputAttributs[2].binding = 0;
+    vertexInputAttributs[2].location = 2;
+    vertexInputAttributs[2].format = VK_FORMAT_R32G32_SFLOAT;
+    vertexInputAttributs[2].offset = offsetof(Vertex, uv);
     VkPipelineVertexInputStateCreateInfo vertexInputStateCI{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
     vertexInputStateCI.vertexBindingDescriptionCount = 1;
     vertexInputStateCI.pVertexBindingDescriptions = &vertexInputBinding;
-    vertexInputStateCI.vertexAttributeDescriptionCount = 2;
+    vertexInputStateCI.vertexAttributeDescriptionCount = 3;
     vertexInputStateCI.pVertexAttributeDescriptions = vertexInputAttributs.data();
 
     // shader stages
@@ -319,6 +347,7 @@ void VulkanExample::prepare() {
     createCommandBuffers();
     createVertexBuffer();
     createUniformBuffers();
+    loadTexture();
     createDescriptors();
     createPipeline();
     prepared = true;
@@ -532,7 +561,7 @@ VkShaderModule VulkanExample::loadSPIRVShader(const std::string& filename) {
 
 VulkanExample::MeshData VulkanExample::createCircleMesh(float radius, uint32_t segmentCount) {
     MeshData mesh{};
-    mesh.vertices.push_back({ { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f } });
+    mesh.vertices.push_back({ { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, { 0.5f, 0.5f } });
 
     for (uint32_t i = 0; i < segmentCount; i++) {
         float angle = 2.0f * glm::pi<float>() * static_cast<float>(i) /
@@ -540,7 +569,9 @@ VulkanExample::MeshData VulkanExample::createCircleMesh(float radius, uint32_t s
         float x = radius * std::cos(angle);
         float y = radius * std::sin(angle);
         float t = static_cast<float>(i) / static_cast<float>(segmentCount);
-        mesh.vertices.push_back({ { x, y, 0.0f }, { t, 1.0f - t, 0.33f } });
+        float u = x / (2.0f * radius) + 0.5f;
+        float v = y / (2.0f * radius) + 0.5f;
+        mesh.vertices.push_back({ { x, y, 0.0f }, { t, 1.0f - t, 0.33f }, { u, v } });
     }
 
     for (uint32_t i = 0; i < segmentCount; i++) {
@@ -559,4 +590,14 @@ void VulkanExample::destroyVmaAllocator() {
         vmaDestroyAllocator(allocator);
         allocator = VK_NULL_HANDLE;
     }
+}
+
+void VulkanExample::loadTexture() {
+    // 项目原有的helper
+    colorTexture.loadFromFile(
+        getAssetPath() + "textures/metalplate01_rgba.ktx",
+        VK_FORMAT_R8G8B8A8_UNORM,
+        vulkanDevice,
+        queue
+    );
 }
