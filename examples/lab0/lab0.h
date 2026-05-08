@@ -70,11 +70,14 @@ public:
 	std::vector<VkSemaphore> renderCompleteSemaphores{};
     std::array<VkFence, MAX_CONCURRENT_FRAMES> waitFences{};
 
+	// 场景物体使用的基础纹理，以及 scene pass 中配套使用的深度附件。
 	AllocatedTexture baseColorTexture;
 	AllocatedImage depthImage;
 
 	// 离屏渲染资源
-	AllocatedTexture offscreenColorTexture;
+	// 离屏颜色目标：第一遍作为 color attachment 写入，第二遍作为 sampled image 读取。
+	AllocatedTexture offscreenColor;
+	// blit pass 专用描述符和管线，用来把 offscreenColor 画回 swapchain。
 	VkDescriptorSetLayout blitDescriptorSetLayout{ VK_NULL_HANDLE };
 	VkDescriptorSet blitDescriptorSet{ VK_NULL_HANDLE };
 	VkPipelineLayout blitPipelineLayout{ VK_NULL_HANDLE };
@@ -116,20 +119,23 @@ public:
 
 	void destroyVmaAllocator(); // 等稳定后加入基类
 
-	// 离屏渲染
+	// 离屏渲染和全屏 blit。后续做后处理、GBuffer 或阴影图时，也会沿用这条资源组织思路。
 	void createOffscreenResources();
 	void destroyOffscreenResources();
 	void createBlitDescriptors();
 	void updateBlitDescriptor();
 	void createBlitPipeline();
-	void drawScene(VkCommandBuffer commandBuffer);
-	void windowResized() override; // resize 时重建 offscreen image，并更新 blit descriptor
+	void drawScene(VkCommandBuffer commandBuffer, const glm::mat4& baseModelMatrix);
+	void windowResized() override; // resize 时重建 offscreen image，并更新 blit descriptor。
 
 private:
 	MeshData createCircleMesh(float radius, uint32_t segmentCount);
 
 	const std::string vertShaderPath = "lab0/lab0.vert.spv";
 	const std::string fragShaderPath = "lab0/lab0.frag.spv";
+
+	const std::string blitVertShaderPath = "lab0/fullscreen.vert.spv";
+	const std::string blitFragShaderPath = "lab0/fullscreen.frag.spv";
 };
 
 

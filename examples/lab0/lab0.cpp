@@ -36,6 +36,12 @@ VulkanExample::VulkanExample() : VulkanExampleBase() {
 
 VulkanExample::~VulkanExample() {
     if (device) {
+        // 先释放依赖 offscreenColor 的 blit 管线与描述符布局，再释放离屏纹理本身。
+        vkDestroyPipeline(device, blitPipeline, nullptr);
+        vkDestroyPipelineLayout(device, blitPipelineLayout, nullptr);
+        vkDestroyDescriptorSetLayout(device, blitDescriptorSetLayout, nullptr);
+        vkutil::destroyTexture(device, allocator, offscreenColor);
+
         vkDestroyPipeline(device, pipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
@@ -149,18 +155,21 @@ void VulkanExample::createUniformBuffers() {
 }
 
 void VulkanExample::createDescriptors() {
+    // descriptor pool 同时服务 scene pass 和 blit pass：
+    // 每个 in-flight frame 一套场景 UBO/纹理描述符，额外再给全屏 blit 保留一个采样 offscreenColor 的 set。
     VkDescriptorPoolSize descriptorTypeCounts[2]{};
     descriptorTypeCounts[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     descriptorTypeCounts[0].descriptorCount = MAX_CONCURRENT_FRAMES;
     descriptorTypeCounts[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    descriptorTypeCounts[1].descriptorCount = MAX_CONCURRENT_FRAMES;
+    descriptorTypeCounts[1].descriptorCount = MAX_CONCURRENT_FRAMES + 1;
 
     VkDescriptorPoolCreateInfo descriptorPoolCI{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
     descriptorPoolCI.poolSizeCount = 2;
     descriptorPoolCI.pPoolSizes = descriptorTypeCounts;
-    descriptorPoolCI.maxSets = MAX_CONCURRENT_FRAMES;
+    descriptorPoolCI.maxSets = MAX_CONCURRENT_FRAMES + 1;
 	VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolCI, nullptr, &descriptorPool));
 
+    // scene pass 的 set layout：binding 0 是相机/矩阵 UBO，binding 1 是物体基础纹理。
     std::array<VkDescriptorSetLayoutBinding, 2> layoutBindings{};
     layoutBindings[0].binding = 0;
     layoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -349,13 +358,18 @@ void VulkanExample::prepare() {
     createVmaAllocator();
     VulkanExampleBase::prepare();
 
+    // 资源创建顺序很关键：先准备可渲染的场景资源，再创建采样它们的描述符和管线。
     createSynchronizationPrimitives();
     createCommandBuffers();
     createVertexBuffer();
     createUniformBuffers();
     loadTexture();
+    // offscreenColor 会被 blit descriptor 引用，所以要先于 createBlitDescriptors 创建。
+    createOffscreenResources();
     createDescriptors();
     createPipeline();
+    createBlitDescriptors();
+    createBlitPipeline();
     prepared = true;
 }
 
@@ -372,6 +386,7 @@ void VulkanExample::render() {
         throw "Could not acquire the next swap chain image!";
     }
 
+    // 每帧更新 camera / model 矩阵。UBO 使用持久映射，写完后 flush 给 GPU 可见。
     ShaderData shaderData{};
     shaderData.projectionMatrix = camera.matrices.perspective;
     shaderData.viewMatrix = camera.matrices.view;
@@ -381,19 +396,23 @@ void VulkanExample::render() {
     memcpy(uniformBuffersV2[currentFrame].mapped, &shaderData, sizeof(ShaderData));
     VK_CHECK_RESULT(vmaFlushAllocation(allocator, uniformBuffersV2[currentFrame].buffer.allocation, 0, sizeof(ShaderData)));
 
+    // 本 sample 采用“两遍渲染”：先画到 offscreenColor，再用全屏三角形采样并输出到 swapchain。
     vkResetCommandBuffer(commandBuffers[currentFrame], 0);
     VkCommandBufferBeginInfo cmdBufInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     const VkCommandBuffer commandBuffer = commandBuffers[currentFrame];
     VK_CHECK_RESULT(vkBeginCommandBuffer(commandBuffer, &cmdBufInfo));
     {
-        vks::tools::insertImageMemoryBarrier(commandBuffer, swapChain.images[imageIndex], 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
+        // Pass 1: scene -> offscreenColor。
+        // offscreenColor 上一帧结束时通常是 shader-read，本帧开画前要切回 attachment layout。
+        vkutil::cmdTransitionImageLayout(commandBuffer, offscreenColor.image.image, offscreenColor.image.layout, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+        offscreenColor.image.layout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
 		
         const VkImageAspectFlags depthAspectMask = getDepthAspectMask(depthFormat);
         vks::tools::insertImageMemoryBarrier(commandBuffer, depthImage.image, 0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VkImageSubresourceRange{ VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 });
 
         VkRenderingAttachmentInfo colorAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-		colorAttachment.imageView = swapChain.imageViews[imageIndex];
-		colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		colorAttachment.imageView = offscreenColor.image.imageView;
+		colorAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
 		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 		colorAttachment.clearValue.color = { 0.11f, 0.10f, 0.13f, 0.0f };
@@ -414,39 +433,55 @@ void VulkanExample::render() {
 		renderingInfo.pStencilAttachment = &depthStencilAttachment;
 
         vkCmdBeginRendering(commandBuffer, &renderingInfo);
+        {
+            VkViewport viewport{ 0.0f, 0.0f, (float)width, (float)height, 0.0f, 1.0f };
+            vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 
-        VkViewport viewport{ 0.0f, 0.0f, (float)width, (float)height, 0.0f, 1.0f };
-		vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+            VkRect2D scissor{ 0, 0, width, height };
+            vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        VkRect2D scissor{ 0, 0, width, height };
-		vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-
-        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &uniformBuffersV2[currentFrame].descriptorSet, 0, nullptr);
-		
-		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-
-        // push constants
-        PushConstantData pushConstantData{};
-        pushConstantData.modelMatrix = shaderData.modelMatrix;
-        pushConstantData.colorMultiplier = glm::vec4(1.0f, 1.0f, 0.5f, 1.0f);
-        vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstantData), &pushConstantData);
-        
-        VkDeviceSize offsets[1]{ 0 };
-		vkCmdBindVertexBuffers(commandBuffer, 0, 1, &circleMeshBuffers.vertexBuffer.handle, offsets);
-		
-		vkCmdBindIndexBuffer(commandBuffer, circleMeshBuffers.indexBuffer.handle, 0, circleMeshBuffers.indexType);
-		
-		vkCmdDrawIndexed(commandBuffer, circleMeshBuffers.indexCount, 1, 0, 0, 0);
-
-        // per draw push constants update
-        pushConstantData.modelMatrix = glm::translate(pushConstantData.modelMatrix, glm::vec3(1.5f, 1.5f, 2.0f));
-        pushConstantData.colorMultiplier = glm::vec4(0.5f, 2.0f, 1.0f, 1.0f);
-        vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstantData), &pushConstantData);
-        vkCmdDrawIndexed(commandBuffer, circleMeshBuffers.indexCount, 1, 0, 0, 0);
-		
+            drawScene(commandBuffer, shaderData.modelMatrix);
+        }
 		vkCmdEndRendering(commandBuffer);
 
-        vks::tools::insertImageMemoryBarrier(commandBuffer, swapChain.images[imageIndex], VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_2_NONE, VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
+        // Pass 1 结束后，offscreenColor 从“被写入的附件”切换为“可被 fragment shader 采样的纹理”。
+        vkutil::cmdTransitionImageLayout(commandBuffer, offscreenColor.image.image, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+        offscreenColor.image.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        // Pass 2: offscreenColor -> swapchain image。
+        // 这里清空/写入的是最终要 present 的交换链图像，不再需要深度附件。
+        vkutil::cmdTransitionImageLayout(commandBuffer, swapChain.images[imageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+
+        VkRenderingAttachmentInfo presentColorAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+        presentColorAttachment.imageView = swapChain.imageViews[imageIndex];
+        presentColorAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+        presentColorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        presentColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        presentColorAttachment.clearValue.color = { 0.02f, 0.02f, 0.025f, 1.0f };
+
+        VkRenderingInfo presentRenderingInfo{ VK_STRUCTURE_TYPE_RENDERING_INFO };
+        presentRenderingInfo.renderArea = { 0, 0, width, height };
+        presentRenderingInfo.layerCount = 1;
+        presentRenderingInfo.colorAttachmentCount = 1;
+        presentRenderingInfo.pColorAttachments = &presentColorAttachment;
+        presentRenderingInfo.pDepthAttachment = nullptr;
+        presentRenderingInfo.pStencilAttachment = nullptr;
+
+        vkCmdBeginRendering(commandBuffer, &presentRenderingInfo);
+        {
+            VkViewport viewport{ 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f };
+            vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+            VkRect2D scissor{ { 0, 0 }, { width, height } };
+            vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, blitPipeline);
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, blitPipelineLayout, 0, 1, &blitDescriptorSet, 0, nullptr);
+            // fullscreen.vert 通过 SV_VertexID 生成全屏三角形，所以这里不绑定 vertex buffer。
+            vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+        }
+        vkCmdEndRendering(commandBuffer);
+
+        // 交给 present queue 前必须切到 PRESENT_SRC_KHR。
+        vkutil::cmdTransitionImageLayout(commandBuffer, swapChain.images[imageIndex], VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_ASPECT_COLOR_BIT);
     }
     VK_CHECK_RESULT(vkEndCommandBuffer(commandBuffer));
 
@@ -605,3 +640,191 @@ void VulkanExample::loadTexture() {
 
     baseColorTexture = vkutil::createTexture2DFromPixels(device ,allocator, submitContext, pixels.data(), textureWidth, textureHeight, VK_FORMAT_R8G8B8A8_UNORM);
 }
+
+void VulkanExample::createOffscreenResources() {
+    // resize 或首次创建时都走这里；先清理旧资源，避免 image/view/sampler 泄漏。
+    destroyOffscreenResources();
+
+    // offscreenColor 同时承担两种角色：scene pass 的颜色附件，以及 blit pass 的输入纹理。
+    offscreenColor.image = vkutil::createAllocatedImage(
+        device, 
+        allocator, 
+        VkExtent3D{width, height, 1}, 
+        swapChain.colorFormat, 
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT
+    );
+
+    VkSamplerCreateInfo samplerCI{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+    samplerCI.magFilter = VK_FILTER_LINEAR;
+    samplerCI.minFilter = VK_FILTER_LINEAR;
+    samplerCI.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCI.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCI.minLod = 0.0f;
+    samplerCI.maxLod = 0.0f;
+    samplerCI.maxAnisotropy = 1.0f;
+    samplerCI.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+    VK_CHECK_RESULT(vkCreateSampler(device, &samplerCI, nullptr, &offscreenColor.sampler));
+
+    offscreenColor.descriptor.sampler = offscreenColor.sampler;
+    offscreenColor.descriptor.imageView = offscreenColor.image.imageView;
+    // descriptor 记录的是“采样时”的 layout；真正的 layout 切换在 render() 的 command buffer 中完成。
+    offscreenColor.descriptor.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+}
+
+void VulkanExample::destroyOffscreenResources() {
+    // vkutil::destroyTexture 会在内部清空句柄，重复调用时也能安全地处理空资源。
+    vkutil::destroyTexture(device, allocator, offscreenColor);
+}
+
+void VulkanExample::createBlitDescriptors() {
+    // blit pass 只需要一个 combined image sampler：从 offscreenColor 读取上一遍渲染结果。
+    VkDescriptorSetLayoutBinding binding{};
+    binding.binding = 0;
+    binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    binding.descriptorCount = 1;
+    binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo descriptorLayoutCI{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+    descriptorLayoutCI.bindingCount = 1;
+    descriptorLayoutCI.pBindings = &binding;
+    VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayoutCI, nullptr, &blitDescriptorSetLayout));
+
+    VkDescriptorSetAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+    allocInfo.descriptorPool = descriptorPool;
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = &blitDescriptorSetLayout;
+    VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &blitDescriptorSet));
+
+    updateBlitDescriptor();
+}
+
+void VulkanExample::updateBlitDescriptor() {
+    // resize 后 offscreen imageView 会变，descriptor set 也必须重新指向新的 view。
+    VkDescriptorImageInfo imageInfo = offscreenColor.descriptor;
+
+    VkWriteDescriptorSet writeDescriptorSet{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    writeDescriptorSet.dstSet = blitDescriptorSet;
+    writeDescriptorSet.dstBinding = 0;
+    writeDescriptorSet.descriptorCount = 1;
+    writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writeDescriptorSet.pImageInfo = &imageInfo;
+
+    vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
+}
+
+void VulkanExample::createBlitPipeline() {
+    // blit pipeline 是一个极简全屏 pass：无顶点输入、无深度测试，只采样 offscreenColor 并写入当前颜色附件。
+    VkPipelineLayoutCreateInfo layoutCI = vkinit::pipelineLayoutCreateInfo();
+    layoutCI.setLayoutCount = 1;
+    layoutCI.pSetLayouts = &blitDescriptorSetLayout;
+    VK_CHECK_RESULT(vkCreatePipelineLayout(device, &layoutCI, nullptr, &blitPipelineLayout));
+
+    VkGraphicsPipelineCreateInfo graphicsPipelineCI{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+    graphicsPipelineCI.layout = blitPipelineLayout;
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+    inputAssemblyStateCI.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    VkPipelineVertexInputStateCreateInfo vertexInputStateCI{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+
+    VkPipelineRasterizationStateCreateInfo rasterizationStateCI{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+    rasterizationStateCI.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizationStateCI.cullMode = VK_CULL_MODE_NONE;
+    rasterizationStateCI.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterizationStateCI.lineWidth = 1.0f;
+
+    VkPipelineColorBlendAttachmentState blendAttachmentState{};
+    blendAttachmentState.colorWriteMask = 0xf;
+    blendAttachmentState.blendEnable = VK_FALSE;
+
+    VkPipelineColorBlendStateCreateInfo colorBlendStateCI{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+    colorBlendStateCI.attachmentCount = 1;
+    colorBlendStateCI.pAttachments = &blendAttachmentState;
+
+    VkPipelineViewportStateCreateInfo viewportStateCI{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+    viewportStateCI.viewportCount = 1;
+    viewportStateCI.scissorCount = 1;
+
+    std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo dynamicStateCI{ VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+    dynamicStateCI.pDynamicStates = dynamicStateEnables.data();
+    dynamicStateCI.dynamicStateCount = static_cast<uint32_t>(dynamicStateEnables.size());
+
+    VkPipelineDepthStencilStateCreateInfo depthStencilStateCI{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+    depthStencilStateCI.depthTestEnable = VK_FALSE;
+    depthStencilStateCI.depthWriteEnable = VK_FALSE;
+
+    VkPipelineMultisampleStateCreateInfo multisampleStateCI{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+    multisampleStateCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    // shader stages
+    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
+    // vertex
+    shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    shaderStages[0].module = loadSPIRVShader(getShadersPath() + blitVertShaderPath);
+    shaderStages[0].pName = "main";
+    assert(shaderStages[0].module != VK_NULL_HANDLE);
+    // fragment
+    shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    shaderStages[1].module = loadSPIRVShader(getShadersPath() + blitFragShaderPath);
+    shaderStages[1].pName = "main";
+    assert(shaderStages[1].module != VK_NULL_HANDLE);
+
+    // dynamic rendering 需要在 pipeline 创建时显式提供 attachment format 信息。
+    // 这个 pass 直接写 swapchain，因此颜色格式使用 swapChain.colorFormat，深度/模板格式留空。
+    VkPipelineRenderingCreateInfoKHR pipelineRenderingCI{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR };
+    pipelineRenderingCI.colorAttachmentCount = 1;
+    pipelineRenderingCI.pColorAttachmentFormats = &swapChain.colorFormat;
+    pipelineRenderingCI.depthAttachmentFormat = VK_FORMAT_UNDEFINED;
+    pipelineRenderingCI.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+
+    graphicsPipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
+    graphicsPipelineCI.pStages = shaderStages.data();
+    graphicsPipelineCI.pVertexInputState = &vertexInputStateCI;
+    graphicsPipelineCI.pInputAssemblyState = &inputAssemblyStateCI;
+    graphicsPipelineCI.pRasterizationState = &rasterizationStateCI;
+    graphicsPipelineCI.pColorBlendState = &colorBlendStateCI;
+    graphicsPipelineCI.pMultisampleState = &multisampleStateCI;
+    graphicsPipelineCI.pViewportState = &viewportStateCI;
+    graphicsPipelineCI.pDepthStencilState = &depthStencilStateCI;
+    graphicsPipelineCI.pDynamicState = &dynamicStateCI;
+    graphicsPipelineCI.pNext = &pipelineRenderingCI;
+    
+    VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &graphicsPipelineCI, nullptr, &blitPipeline));
+    vkDestroyShaderModule(device, shaderStages[0].module, nullptr);
+    vkDestroyShaderModule(device, shaderStages[1].module, nullptr);
+}
+
+void VulkanExample::drawScene(VkCommandBuffer commandBuffer, const glm::mat4& baseModelMatrix) {
+    // drawScene 只关心“怎么画场景”，不关心画到哪里；目标附件由外层 vkCmdBeginRendering 决定。
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &uniformBuffersV2[currentFrame].descriptorSet, 0, nullptr);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+
+    VkDeviceSize offsets[1]{ 0 };
+    vkCmdBindVertexBuffers(commandBuffer, 0, 1, &circleMeshBuffers.vertexBuffer.handle, offsets);
+    vkCmdBindIndexBuffer(commandBuffer, circleMeshBuffers.indexBuffer.handle, 0, circleMeshBuffers.indexType);
+
+    PushConstantData pushConstantData{};
+    pushConstantData.modelMatrix = baseModelMatrix;
+    pushConstantData.colorMultiplier = glm::vec4(1.0f, 1.0f, 0.5f, 1.0f);
+    vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstantData), &pushConstantData);
+    vkCmdDrawIndexed(commandBuffer, circleMeshBuffers.indexCount, 1, 0, 0, 0);
+
+    pushConstantData.modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(1.5f, 1.5f, 2.0f)) * baseModelMatrix;
+    pushConstantData.colorMultiplier = glm::vec4(0.5f, 2.0f, 1.0f, 1.0f);
+    vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstantData), &pushConstantData);
+    vkCmdDrawIndexed(commandBuffer, circleMeshBuffers.indexCount, 1, 0, 0, 0);
+}
+
+void VulkanExample::windowResized() {
+    // 基类已经处理 swapchain 尺寸变化；这里补齐与窗口尺寸绑定的 offscreenColor，并刷新 blit descriptor。
+    destroyOffscreenResources();
+    createOffscreenResources();
+    updateBlitDescriptor();
+}
+

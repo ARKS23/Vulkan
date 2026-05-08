@@ -91,19 +91,47 @@ namespace vkutil {
         imageBarrier.subresourceRange.baseArrayLayer = 0;
         imageBarrier.subresourceRange.layerCount = 1;
 
-        // 上传第一步：丢弃旧内容，把 image 转成 transfer write 可写状态。
+        // UNDEFINED -> TRANSFER_DST_OPTIMAL
         if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
             imageBarrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
             imageBarrier.srcAccessMask = 0;
             imageBarrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
             imageBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
         }
-        // 上传第二步：让 transfer 写入对 fragment shader 的纹理采样可见。
+        // TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
         else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
             imageBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
             imageBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
             imageBarrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
             imageBarrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+        }
+        // UNDEFINED -> ATTACHMENT_OPTIMAL
+        else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL) {
+            imageBarrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
+            imageBarrier.srcAccessMask = 0;
+            imageBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            imageBarrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        }
+        // SHADER_READ_ONLY_OPTIMAL -> ATTACHMENT_OPTIMAL
+        else if (oldLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL) {
+            imageBarrier.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            imageBarrier.srcAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+            imageBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            imageBarrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        }
+        // ATTACHMENT_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
+        else if (oldLayout == VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+            imageBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            imageBarrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+            imageBarrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            imageBarrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+        }
+        // ATTACHMENT_OPTIMAL -> PRESENT_SRC_KHR
+        else if (oldLayout == VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+            imageBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            imageBarrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+            imageBarrier.dstStageMask = VK_PIPELINE_STAGE_2_NONE;
+            imageBarrier.dstAccessMask = 0;
         }
         else {
             throw std::runtime_error("unsupported layout transition!");
