@@ -1,5 +1,3 @@
-// Copyright 2020 Google LLC
-
 struct VSInput
 {
 [[vk::location(0)]] float3 Pos : POSITION0;

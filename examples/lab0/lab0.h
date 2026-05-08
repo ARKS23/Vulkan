@@ -71,6 +71,14 @@ public:
     std::array<VkFence, MAX_CONCURRENT_FRAMES> waitFences{};
 
 	AllocatedTexture baseColorTexture;
+	AllocatedImage depthImage;
+
+	// 离屏渲染资源
+	AllocatedTexture offscreenColorTexture;
+	VkDescriptorSetLayout blitDescriptorSetLayout{ VK_NULL_HANDLE };
+	VkDescriptorSet blitDescriptorSet{ VK_NULL_HANDLE };
+	VkPipelineLayout blitPipelineLayout{ VK_NULL_HANDLE };
+	VkPipeline blitPipeline{ VK_NULL_HANDLE };
 
     VkCommandPool commandPool{ VK_NULL_HANDLE };
 	std::array<VkCommandBuffer, MAX_CONCURRENT_FRAMES> commandBuffers{};
@@ -86,7 +94,6 @@ public:
     virtual ~VulkanExample() override;
 
     virtual void getEnabledFeatures() override;
-    uint32_t getMemoryTypeIndex(uint32_t typeBits, VkMemoryPropertyFlags properties);
 
 	void createVmaAllocator();	// 等稳定后加入基类
     void createSynchronizationPrimitives();
@@ -108,6 +115,15 @@ public:
 	void setupRenderPass() override {}
 
 	void destroyVmaAllocator(); // 等稳定后加入基类
+
+	// 离屏渲染
+	void createOffscreenResources();
+	void destroyOffscreenResources();
+	void createBlitDescriptors();
+	void updateBlitDescriptor();
+	void createBlitPipeline();
+	void drawScene(VkCommandBuffer commandBuffer);
+	void windowResized() override; // resize 时重建 offscreen image，并更新 blit descriptor
 
 private:
 	MeshData createCircleMesh(float radius, uint32_t segmentCount);

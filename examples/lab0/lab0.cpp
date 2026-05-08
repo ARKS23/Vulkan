@@ -1,6 +1,23 @@
 #include "lab0.h"
 #include "vk_resources.h"
 
+// 工具辅助函数
+namespace {
+    bool hasStencilComponent(VkFormat format) {
+        return format == VK_FORMAT_D16_UNORM_S8_UINT ||
+                format == VK_FORMAT_D24_UNORM_S8_UINT ||
+                format == VK_FORMAT_D32_SFLOAT_S8_UINT;
+    }
+
+    VkImageAspectFlags getDepthAspectMask(VkFormat format) {
+        VkImageAspectFlags aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        if (hasStencilComponent(format)) {
+            aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+        }
+        return aspectMask;
+    }
+}
+
 
 VulkanExample::VulkanExample() : VulkanExampleBase() {
     title = "My First Vulkan Example";
@@ -25,6 +42,7 @@ VulkanExample::~VulkanExample() {
 
         //colorTexture.destroy();
         vkutil::destroyTexture(device, allocator, baseColorTexture);
+        vkutil::destroyAllocatedImage(device, allocator, depthImage);
 
         if (circleMeshBuffers.vertexBuffer.handle != VK_NULL_HANDLE) {
             vkutil::destroyAllocatedBuffer(allocator, circleMeshBuffers.vertexBuffer);
@@ -56,19 +74,6 @@ void VulkanExample::getEnabledFeatures() {
     if (deviceProperties.apiVersion < VK_API_VERSION_1_3) {
         vks::tools::exitFatal("Selected GPU does not support support Vulkan 1.3", VK_ERROR_INCOMPATIBLE_DRIVER);
 	}
-}
-
-uint32_t VulkanExample::getMemoryTypeIndex(uint32_t typeBits, VkMemoryPropertyFlags properties) {
-    // 遍历当前设备可用的全部内存类型
-    for (uint32_t i = 0; i < deviceMemoryProperties.memoryTypeCount; i++) {
-        if ((typeBits & 1) == 1) {
-            if ((deviceMemoryProperties.memoryTypes[i].propertyFlags & properties) == properties) {
-                return i;
-            }
-        }
-        typeBits >>= 1;
-    }
-    throw "Could not find a suitable memory type!";
 }
 
 void VulkanExample::createVmaAllocator() {
@@ -341,9 +346,9 @@ void VulkanExample::createPipeline() {
 }
 
 void VulkanExample::prepare() {
+    createVmaAllocator();
     VulkanExampleBase::prepare();
 
-    createVmaAllocator();
     createSynchronizationPrimitives();
     createCommandBuffers();
     createVertexBuffer();
@@ -382,7 +387,9 @@ void VulkanExample::render() {
     VK_CHECK_RESULT(vkBeginCommandBuffer(commandBuffer, &cmdBufInfo));
     {
         vks::tools::insertImageMemoryBarrier(commandBuffer, swapChain.images[imageIndex], 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
-		vks::tools::insertImageMemoryBarrier(commandBuffer, depthStencil.image, 0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VkImageSubresourceRange{ VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 });
+		
+        const VkImageAspectFlags depthAspectMask = getDepthAspectMask(depthFormat);
+        vks::tools::insertImageMemoryBarrier(commandBuffer, depthImage.image, 0, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VkImageSubresourceRange{ VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 });
 
         VkRenderingAttachmentInfo colorAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
 		colorAttachment.imageView = swapChain.imageViews[imageIndex];
@@ -392,8 +399,8 @@ void VulkanExample::render() {
 		colorAttachment.clearValue.color = { 0.11f, 0.10f, 0.13f, 0.0f };
 
         VkRenderingAttachmentInfo depthStencilAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-		depthStencilAttachment.imageView = depthStencil.view;
-		depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		depthStencilAttachment.imageView = depthImage.imageView;
+		depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
 		depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 		depthStencilAttachment.clearValue.depthStencil = { 1.0f,  0 };
@@ -476,43 +483,25 @@ void VulkanExample::render() {
 }
 
 void VulkanExample::setupDepthStencil() {
-    // 创建一个 optimal tiled 的 image，作为深度/模板附件使用
-    VkImageCreateInfo imageCI{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
-    imageCI.imageType = VK_IMAGE_TYPE_2D;
-    imageCI.format = depthFormat;
-    imageCI.extent = { width, height, 1 };
-    imageCI.mipLevels = 1;
-    imageCI.arrayLayers = 1;
-    imageCI.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageCI.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageCI.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    imageCI.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    VK_CHECK_RESULT(vkCreateImage(device, &imageCI, nullptr, &depthStencil.image));
+    vkutil::destroyAllocatedImage(device, allocator, depthImage); // 用于支持resize
 
-    // 为该 image 分配 device local 内存，并绑定到 image 上
-    VkMemoryAllocateInfo memAlloc{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
-    VkMemoryRequirements memReqs;
-    vkGetImageMemoryRequirements(device, depthStencil.image, &memReqs);
-    memAlloc.allocationSize = memReqs.size;
-    memAlloc.memoryTypeIndex = getMemoryTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &depthStencil.memory));
-    VK_CHECK_RESULT(vkBindImageMemory(device, depthStencil.image, depthStencil.memory, 0));
+    const VkImageAspectFlags aspectMask = getDepthAspectMask(depthFormat);
+    depthImage = vkutil::createAllocatedImage(
+        device, 
+        allocator, 
+        VkExtent3D{width, height, 1}, 
+        depthFormat, 
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        aspectMask
+    );
 
-    VkImageViewCreateInfo depthStencilViewCI{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-    depthStencilViewCI.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    depthStencilViewCI.format = depthFormat;
-    depthStencilViewCI.subresourceRange = {};
-    depthStencilViewCI.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    // 只有 depth+stencil 格式才需要把 stencil aspect 也包含进来
-    if (depthFormat >= VK_FORMAT_D16_UNORM_S8_UINT) {
-        depthStencilViewCI.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
-    }
-    depthStencilViewCI.subresourceRange.baseMipLevel = 0;
-    depthStencilViewCI.subresourceRange.levelCount = 1;
-    depthStencilViewCI.subresourceRange.baseArrayLayer = 0;
-    depthStencilViewCI.subresourceRange.layerCount = 1;
-    depthStencilViewCI.image = depthStencil.image;
-    VK_CHECK_RESULT(vkCreateImageView(device, &depthStencilViewCI, nullptr, &depthStencil.view));
+    depthImage.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    // 基类 depthStencil 由 VulkanExampleBase 手动销毁。
+    // Lab0 的 VMA depth image 不交给基类管理，避免 resize/析构时错误释放。
+    depthStencil.image = VK_NULL_HANDLE;
+    depthStencil.view = VK_NULL_HANDLE;
+    depthStencil.memory = VK_NULL_HANDLE;
 }
 
 VkShaderModule VulkanExample::loadSPIRVShader(const std::string& filename) {
@@ -602,8 +591,7 @@ void VulkanExample::loadTexture() {
     std::vector<uint8_t> pixels(textureWidth * textureHeight * channelCount);
     for (uint32_t y = 0; y < textureHeight; y++) {
         for (uint32_t x = 0; x < textureWidth; x++) {
-            const bool checker =
-            ((x / checkerSize) + (y / checkerSize)) % 2 == 0;
+            const bool checker = ((x / checkerSize) + (y / checkerSize)) % 2 == 0;
             const size_t pixelIndex = static_cast<size_t>(y * textureWidth + x) * channelCount;
             pixels[pixelIndex + 0] = checker ? 230 : 35;
             pixels[pixelIndex + 1] = checker ? 210 : 45;
