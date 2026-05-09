@@ -560,6 +560,7 @@ public:
 		VulkanExampleBase::submitFrame();
 	}
 
+	// UI调试
 	virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay)
 	{
 		if (overlay->header("Settings")) {

@@ -2,13 +2,14 @@
 
 A comprehensive collection of open source C++ examples for [Vulkan®](https://www.vulkan.org), the low-level graphics and compute API from Khronos.
 
-## ARK's Docs
+## ARK Branch
+- 图形实验室项目，在原项目的基础上扩展了`VMA`管理内存分配，供后续图形算法实验复用。
 
 [![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=BHXPMV6ZKPH9E)
 
 ## Table of Contents
 - [Vulkan C++ examples and demos](#vulkan-c-examples-and-demos)
-  - [ARK's Docs](#arks-docs)
+  - [ARK Branch](#ark-branch)
   - [Table of Contents](#table-of-contents)
   - [How to Vulkan in 2026](#how-to-vulkan-in-2026)
   - [Official Khronos Vulkan Samples](#official-khronos-vulkan-samples)
