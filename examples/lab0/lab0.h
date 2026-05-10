@@ -29,10 +29,10 @@ public:
 		float uv[2];
 	};
 
-    struct VulkanBuffer {
-        VkDeviceMemory memory{ VK_NULL_HANDLE };
-		VkBuffer handle{ VK_NULL_HANDLE };
-    };
+    // struct VulkanBuffer {
+    //     VkDeviceMemory memory{ VK_NULL_HANDLE };
+	// 	VkBuffer handle{ VK_NULL_HANDLE };
+    // };
 
 	struct UniformBufferV2 {
 		AllocatedBuffer buffer;

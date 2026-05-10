@@ -1,0 +1,4 @@
+Sun May 10 15:16:24 2026: Sample: Lab1: shadow mapping
+Sun May 10 15:16:25 2026: ERROR: [-1881362053][UNASSIGNED-GeneralParameterError-RequiredHandle] : vkCmdBindPipeline(): pipeline is VK_NULL_HANDLE.
+Sun May 10 15:16:25 2026: ERROR: [-484365098][VUID-vkCmdBindPipeline-pipeline-parameter] : vkCmdBindPipeline(): pipeline Invalid VkPipeline Object 0x0.
+The Vulkan spec states: pipeline must be a valid VkPipeline handle (https://docs.vulkan.org/spec/latest/chapters/pipelines.html#VUID-vkCmdBindPipeline-pipeline-parameter)

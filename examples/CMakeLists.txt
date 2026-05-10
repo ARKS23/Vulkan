@@ -186,6 +186,7 @@ set(EXAMPLES
 	viewportarray
 	vulkanscene
 	lab0
+	lab1
 )
 
 buildExamples()
