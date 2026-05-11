@@ -56,7 +56,7 @@ void VulkanExample::render()
     if (!prepared)  return;
 
     VulkanExampleBase::prepareFrame();
-    //if (!paused || camera.updated) updateLight();
+    if (!paused || camera.updated) updateLight();
     updateUniformBuffers();
     buildCommandBuffer();
     VulkanExampleBase::submitFrame();
@@ -190,6 +190,7 @@ void VulkanExample::setupDescriptors()
         shadowBufferInfo.offset = 0;
         shadowBufferInfo.range = sizeof(UniformDataShadowPass);
 
+        // debug descriptor
         VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].debug));
         std::array<VkWriteDescriptorSet, 2> debugWrites = {
             vks::initializers::writeDescriptorSet(descriptorSets[i].debug, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &sceneBufferInfo),
@@ -197,6 +198,7 @@ void VulkanExample::setupDescriptors()
         };
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(debugWrites.size()), debugWrites.data(), 0, nullptr);
 
+        // shadow map descriptor
         VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].offscreen));
         std::array<VkWriteDescriptorSet, 2> offscreenWrites = {
             vks::initializers::writeDescriptorSet(descriptorSets[i].offscreen, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &shadowBufferInfo),
@@ -204,6 +206,7 @@ void VulkanExample::setupDescriptors()
         };
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(offscreenWrites.size()), offscreenWrites.data(), 0, nullptr);
 
+        // scene descriptor
         VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].scene));
         std::array<VkWriteDescriptorSet, 2> sceneWrites = {
             vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &sceneBufferInfo),
@@ -273,6 +276,14 @@ void VulkanExample::createPipelines()
     VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.debug));
 
     // scene pipeline
+    VkPipelineVertexInputStateCreateInfo *pSceneVertexInputStateCI = vkglTF::Vertex::getPipelineVertexInputState({vkglTF::VertexComponent::Position, vkglTF::VertexComponent::UV, vkglTF::VertexComponent::Color, vkglTF::VertexComponent::Normal});
+    pipelineCI.pVertexInputState = pSceneVertexInputStateCI;
+    rasterizationStateCI.cullMode = VK_CULL_MODE_BACK_BIT;
+    renderingCreateInfo.depthAttachmentFormat = shadowMap.format;
+    shaderStages[0] = loadShader(getShadersPath() + sceneVertexShaderPath, VK_SHADER_STAGE_VERTEX_BIT);
+    shaderStages[1] = loadShader(getShadersPath() + sceneFragmentShaderPath, VK_SHADER_STAGE_FRAGMENT_BIT);
+    // TODO：PCF管线
+    VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.sceneShadow));
 
     // shadow pipeline
     VkPipelineRenderingCreateInfo shadowRenderingInfo{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
@@ -286,7 +297,6 @@ void VulkanExample::createPipelines()
     shaderStages[0] = loadShader(getShadersPath() + shadowVertexShaderPath, VK_SHADER_STAGE_VERTEX_BIT);
     pipelineCI.stageCount = 1;  // 深度图不需要片段着色器
 
-    VkPipelineVertexInputStateCreateInfo *pSceneVertexInputStateCI = vkglTF::Vertex::getPipelineVertexInputState({vkglTF::VertexComponent::Position, vkglTF::VertexComponent::UV, vkglTF::VertexComponent::Color, vkglTF::VertexComponent::Normal});
     pipelineCI.pVertexInputState = pSceneVertexInputStateCI;    // 配置输入顶点信息
 
     colorBlendStateCI.attachmentCount = 0;  // 不需要混合
@@ -328,7 +338,16 @@ void VulkanExample::updateUniformBuffers()
     vmaFlushAllocation(allocator, uniformBuffers[currentBuffer].shadowOffscreenBuffer.allocation, 0, sizeof(uniformDataShadow));
 
     // scene uniform
-
+    uniformDataScene.projection = camera.matrices.perspective;
+    uniformDataScene.view = camera.matrices.view;
+    uniformDataScene.model = glm::mat4(1.0f);
+    uniformDataScene.lightPos = glm::vec4(lightPos, 1.0f);
+    uniformDataScene.cameraPos = camera.viewPos;
+    uniformDataScene.depthBiasMVP = uniformDataShadow.depthMVP;
+    uniformDataScene.zNear = shadowNearPlane;
+    uniformDataScene.zFar = shadowFarPlane;
+    memcpy(uniformBuffers[currentBuffer].sceneBuffer.allocationInfo.pMappedData, &uniformDataScene, sizeof(uniformDataScene));
+    vmaFlushAllocation(allocator, uniformBuffers[currentBuffer].sceneBuffer.allocation, 0, sizeof(uniformDataScene));
 }
 
 void VulkanExample::buildCommandBuffer()
@@ -337,14 +356,18 @@ void VulkanExample::buildCommandBuffer()
     VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
     VK_CHECK_RESULT(vkBeginCommandBuffer(commandBuffer, &cmdBufInfo));
 
+    // shadow map
     vkutil::cmdTransitionImageLayout(commandBuffer, shadowMap.shadowTexture.image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
     shadowMap.shadowTexture.image.layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     drawShadowMap(commandBuffer);
     vkutil::cmdTransitionImageLayout(commandBuffer, shadowMap.shadowTexture.image.image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
     shadowMap.shadowTexture.image.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    // TODO: 场景绘制
+
 
     vkutil::cmdTransitionImageLayout(commandBuffer, swapChain.images[currentImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
-    drawQuad(commandBuffer);
+    //drawQuad(commandBuffer);
+    drawScene(commandBuffer);
     vkutil::cmdTransitionImageLayout(commandBuffer, swapChain.images[currentImageIndex], VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_ASPECT_COLOR_BIT);
 
     VK_CHECK_RESULT(vkEndCommandBuffer(commandBuffer));
@@ -380,6 +403,43 @@ void VulkanExample::drawShadowMap(VkCommandBuffer commandBuffer)
     vkCmdEndRendering(commandBuffer);
 }
 
+void VulkanExample::drawScene(VkCommandBuffer commandBuffer)
+{
+    VkRenderingAttachmentInfo colorAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    colorAttachment.imageView = swapChain.imageViews[currentImageIndex];
+    colorAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.clearValue.color = { 0.01f, 0.02f, 0.025f, 1.0f };
+
+    VkRenderingAttachmentInfo depthAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    depthAttachment.imageView = depthStencil.view;
+    depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depthAttachment.clearValue.depthStencil = { 1.0f, 0 };
+
+    VkRenderingInfo renderingInfo{ VK_STRUCTURE_TYPE_RENDERING_INFO };
+    renderingInfo.renderArea = { 0, 0, width, height };
+    renderingInfo.layerCount = 1;
+    renderingInfo.colorAttachmentCount = 1;
+    renderingInfo.pColorAttachments = &colorAttachment;
+    renderingInfo.pDepthAttachment = &depthAttachment;
+    renderingInfo.pStencilAttachment = nullptr;
+
+    vkCmdBeginRendering(commandBuffer, &renderingInfo);
+    {
+        VkViewport viewport{ 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f };
+        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+        VkRect2D scissor{ { 0, 0 }, { width, height } };
+        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.sceneShadow);
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer].scene, 0, nullptr);
+        scenes[sceneIndex].draw(commandBuffer);
+    }
+    vkCmdEndRendering(commandBuffer);
+}
+
 void VulkanExample::drawQuad(VkCommandBuffer commandBuffer)
 {
     VkRenderingAttachmentInfo colorAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
@@ -387,7 +447,7 @@ void VulkanExample::drawQuad(VkCommandBuffer commandBuffer)
     colorAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.clearValue.color = { 0.01f, 0.02f, 0.125f, 1.0f };
+    colorAttachment.clearValue.color = { 0.01f, 0.02f, 0.025f, 1.0f };
 
     VkRenderingInfo renderingInfo{ VK_STRUCTURE_TYPE_RENDERING_INFO };
     renderingInfo.renderArea = { 0, 0, width, height };
@@ -409,3 +469,5 @@ void VulkanExample::drawQuad(VkCommandBuffer commandBuffer)
     }
     vkCmdEndRendering(commandBuffer);
 }
+
+// TODO: draw 和 shader & transition

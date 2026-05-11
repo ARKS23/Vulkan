@@ -32,6 +32,7 @@ public:
         glm::mat4 model;
         glm::mat4 depthBiasMVP;
         glm::vec4 lightPos;
+        glm::vec4 cameraPos;
 
         float zNear;
         float zFar;
@@ -96,8 +97,8 @@ public:
 
     // 光源
     float rotationAngle = 0.0f;
-    float rotationSpeed = 0.05f;
-    float lightRadius = 3.f;
+    float rotationSpeed = 0.01f;
+    float lightRadius = 8.f;
     glm::vec3 lightPos = glm::vec3(4.0f, -7.f, 3.f);
 
 public:
@@ -127,16 +128,18 @@ public:
     void updateUniformBuffers();
 
     void drawShadowMap(VkCommandBuffer commandBuffer);
+    void drawScene(VkCommandBuffer commandBuffer);
     void drawQuad(VkCommandBuffer commandBuffer);
 
 private:
+    // shader
     const std::string shadowVertexShaderPath = "lab1/shadowVertex.vert.spv";
-    //const std::string shadowFragmentShaderPath = "";
-    const std::string sceneVertexShaderPath = "";
-    const std::string sceneFragmentShaderPath = "";
+    const std::string sceneVertexShaderPath = "lab1/scene.vert.spv";
+    const std::string sceneFragmentShaderPath = "lab1/scene.frag.spv";
     const std::string quadVertexShaderPath = "lab1/quad.vert.spv";
     const std::string quadFragmentShaderPath = "lab1/quad.frag.spv";
 
+    // model
     const std::string shadowScenePath = "models/vulkanscene_shadow.gltf";
     const std::string sampleScenePath = "models/samplescene.gltf";
 };
