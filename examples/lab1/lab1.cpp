@@ -53,7 +53,7 @@ void VulkanExample::prepare()
 
 void VulkanExample::render()
 {
-    if (!prepared)  return;
+    if (!prepared) return;
 
     VulkanExampleBase::prepareFrame();
     if (!paused || camera.updated) updateLight();
@@ -62,25 +62,32 @@ void VulkanExample::render()
     VulkanExampleBase::submitFrame();
 }
 
-void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay *overlay) {
+void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay *overlay)
+{
     if (overlay->header("Settings")) {
         overlay->comboBox("Scenes", &sceneIndex, sceneNames);
+    }
+
+    if (overlay->header("Light Settings")) {
         overlay->colorPicker("Light color", &pushConstan.lightColor.x);
+        overlay->sliderFloat("Light X", &lightPos.x, -20.0f, 20.0f);
+        overlay->sliderFloat("Light Y", &lightPos.y, -20.0f, 20.0f);
+        overlay->sliderFloat("Light Z", &lightPos.z, -20.0f, 20.0f);
+    }
+
+    if (overlay->header("Shadow Settings")) {
         overlay->sliderFloat("Min Bias", &pushConstan.minShadowBias, 0.0f, 0.01f);
         overlay->sliderFloat("Slope Bias", &pushConstan.slopeShadowBias, 0.0f, 0.05f);
         overlay->sliderFloat("Raster Bias", &depthBiasConstant, 0.0f, 5.0f);
         overlay->sliderFloat("Raster Slope", &depthBiasSlope, 0.0f, 5.0f);
         overlay->sliderInt("EnablePCF", &pushConstan.enablePCF, 0, 1);
         overlay->sliderInt("PCF Radius", &pushConstan.PCFRadius, 1, 3);
-        overlay->sliderFloat("Light X", &lightPos.x, -20.0f, 20.0f);
-        overlay->sliderFloat("Light Y", &lightPos.y, -20.0f, 20.0f);
-        overlay->sliderFloat("Light Z", &lightPos.z, -20.0f, 20.0f);
     }
 }
 
 void VulkanExample::createVmaAllocator()
 {
-    VmaAllocatorCreateInfo allocatorInfo {};
+    VmaAllocatorCreateInfo allocatorInfo{};
     allocatorInfo.device = device;
     allocatorInfo.physicalDevice = physicalDevice;
     allocatorInfo.instance = instance;
@@ -98,7 +105,6 @@ void VulkanExample::destroyVmaAllocator()
 
 void VulkanExample::loadAssets()
 {
-    // 第一阶段只需要几何参与 depth/debug 流程，先不加载材质贴图，避免 descriptor 体系过早复杂化。
     const uint32_t glTFLoadingFlags =
         vkglTF::FileLoadingFlags::PreTransformVertices |
         vkglTF::FileLoadingFlags::PreMultiplyVertexColors |
@@ -117,7 +123,6 @@ void VulkanExample::createShadowResources()
 {
     destroyShadowResources();
 
-    // Shadow map 是 depth attachment + sampled image：第一遍写深度，第二遍/debug pass 采样它。
     shadowMap.shadowTexture.image = vkutil::createAllocatedImage(
         device,
         allocator,
@@ -126,7 +131,7 @@ void VulkanExample::createShadowResources()
         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         VK_IMAGE_ASPECT_DEPTH_BIT);
 
-    VkSamplerCreateInfo samplerInfo { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+    VkSamplerCreateInfo samplerInfo{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
     samplerInfo.magFilter = VK_FILTER_NEAREST;
     samplerInfo.minFilter = VK_FILTER_NEAREST;
     samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
@@ -178,7 +183,6 @@ void VulkanExample::destroyUniformBuffers()
 
 void VulkanExample::setupDescriptors()
 {
-    // 暂时使用一套 layout 稳住数据流：binding 0 是当前 pass 的 UBO，binding 1 是 shadow map。
     std::vector<VkDescriptorPoolSize> poolSizes = {
         vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, maxConcurrentFrames * 3),
         vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxConcurrentFrames * 3)
@@ -186,7 +190,6 @@ void VulkanExample::setupDescriptors()
     VkDescriptorPoolCreateInfo descriptorPoolInfo = vks::initializers::descriptorPoolCreateInfo(poolSizes, maxConcurrentFrames * 3);
     VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
 
-    // binding 0 : UBO            biding 1 : texture
     std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
         vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
         vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1)
@@ -198,17 +201,16 @@ void VulkanExample::setupDescriptors()
     VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayout, 1);
 
     for (size_t i = 0; i < uniformBuffers.size(); i++) {
-        VkDescriptorBufferInfo sceneBufferInfo {};
+        VkDescriptorBufferInfo sceneBufferInfo{};
         sceneBufferInfo.buffer = uniformBuffers[i].sceneBuffer.handle;
         sceneBufferInfo.offset = 0;
         sceneBufferInfo.range = sizeof(UniformDataScenePass);
 
-        VkDescriptorBufferInfo shadowBufferInfo {};
+        VkDescriptorBufferInfo shadowBufferInfo{};
         shadowBufferInfo.buffer = uniformBuffers[i].shadowOffscreenBuffer.handle;
         shadowBufferInfo.offset = 0;
         shadowBufferInfo.range = sizeof(UniformDataShadowPass);
 
-        // debug descriptor
         VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].debug));
         std::array<VkWriteDescriptorSet, 2> debugWrites = {
             vks::initializers::writeDescriptorSet(descriptorSets[i].debug, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &sceneBufferInfo),
@@ -216,7 +218,6 @@ void VulkanExample::setupDescriptors()
         };
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(debugWrites.size()), debugWrites.data(), 0, nullptr);
 
-        // shadow map descriptor
         VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].offscreen));
         std::array<VkWriteDescriptorSet, 2> offscreenWrites = {
             vks::initializers::writeDescriptorSet(descriptorSets[i].offscreen, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &shadowBufferInfo),
@@ -224,7 +225,6 @@ void VulkanExample::setupDescriptors()
         };
         vkUpdateDescriptorSets(device, static_cast<uint32_t>(offscreenWrites.size()), offscreenWrites.data(), 0, nullptr);
 
-        // scene descriptor
         VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].scene));
         std::array<VkWriteDescriptorSet, 2> sceneWrites = {
             vks::initializers::writeDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &sceneBufferInfo),
@@ -244,41 +244,64 @@ void VulkanExample::destroyDescriptors()
 
 void VulkanExample::createPipelines()
 {
-    // push constants
-    VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(PushconstantData), 0);
+    createPipelineLayout();
+    createDebugPipeline();
+    createScenePipeline();
+    createShadowPipeline();
+    createLightPipeline();
+}
 
-    // 复用一个 pipeline Layout
+void VulkanExample::createPipelineLayout()
+{
+    // 弄了一个超大的push constant，足够所有管线使用
+    static_assert(sizeof(PushconstantData) <= 128, "Scene push constants exceed the guaranteed Vulkan minimum");
+    static_assert(sizeof(PushConstantDataLight) <= 128, "Light push constants exceed the guaranteed Vulkan minimum");
+
+    const uint32_t pushConstantSize = static_cast<uint32_t>(
+        sizeof(PushConstantDataLight) > sizeof(PushconstantData) ? sizeof(PushConstantDataLight) : sizeof(PushconstantData));
+
+    VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        pushConstantSize,
+        0);
+
     VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
     pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
     pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
     VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+}
 
-    // pipeline 细节设置
+void VulkanExample::createDebugPipeline()
+{
     VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
-    VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
+    VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
     VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
     VkPipelineColorBlendStateCreateInfo colorBlendStateCI = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
-    VkPipelineDepthStencilStateCreateInfo depthStencilStateCI = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
+    VkPipelineDepthStencilStateCreateInfo depthStencilStateCI = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_FALSE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL);
     VkPipelineViewportStateCreateInfo viewportStateCI = vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
     VkPipelineMultisampleStateCreateInfo multisampleStateCI = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT, 0);
     std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
     VkPipelineDynamicStateCreateInfo dynamicStateCI = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
     std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
 
-    // dynamic rendering设置
-    VkPipelineRenderingCreateInfo renderingCreateInfo = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
+    VkPipelineRenderingCreateInfo renderingCreateInfo = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
     renderingCreateInfo.colorAttachmentCount = 1;
     renderingCreateInfo.pColorAttachmentFormats = &swapChain.colorFormat;
     renderingCreateInfo.depthAttachmentFormat = VK_FORMAT_UNDEFINED;
     renderingCreateInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
 
-    VkGraphicsPipelineCreateInfo pipelineCI = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+    shaderStages[0] = loadShader(getShadersPath() + quadVertexShaderPath, VK_SHADER_STAGE_VERTEX_BIT);
+    shaderStages[1] = loadShader(getShadersPath() + quadFragmentShaderPath, VK_SHADER_STAGE_FRAGMENT_BIT);
+
+    VkPipelineVertexInputStateCreateInfo emptyInputState = vks::initializers::pipelineVertexInputStateCreateInfo();
+
+    VkGraphicsPipelineCreateInfo pipelineCI = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
     pipelineCI.renderPass = VK_NULL_HANDLE;
     pipelineCI.subpass = 0;
     pipelineCI.pNext = &renderingCreateInfo;
-    // 常规设置
     pipelineCI.layout = pipelineLayout;
     pipelineCI.pInputAssemblyState = &inputAssemblyStateCI;
+    pipelineCI.pVertexInputState = &emptyInputState;
     pipelineCI.pViewportState = &viewportStateCI;
     pipelineCI.pRasterizationState = &rasterizationStateCI;
     pipelineCI.pColorBlendState = &colorBlendStateCI;
@@ -288,60 +311,11 @@ void VulkanExample::createPipelines()
     pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
     pipelineCI.pStages = shaderStages.data();
 
-    // debug pipeline
-    rasterizationStateCI.cullMode = VK_CULL_MODE_NONE;
-    shaderStages[0] = loadShader(getShadersPath() + quadVertexShaderPath, VK_SHADER_STAGE_VERTEX_BIT);
-    shaderStages[1] = loadShader(getShadersPath() + quadFragmentShaderPath, VK_SHADER_STAGE_FRAGMENT_BIT);
-
-    VkPipelineVertexInputStateCreateInfo emptyInputState = vks::initializers::pipelineVertexInputStateCreateInfo();
-    pipelineCI.pVertexInputState = &emptyInputState; // 配置空的顶点输入信息
-
     VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.debug));
-
-    // scene pipeline
-    VkPipelineVertexInputStateCreateInfo *pSceneVertexInputStateCI = vkglTF::Vertex::getPipelineVertexInputState({vkglTF::VertexComponent::Position, vkglTF::VertexComponent::UV, vkglTF::VertexComponent::Color, vkglTF::VertexComponent::Normal});
-    pipelineCI.pVertexInputState = pSceneVertexInputStateCI;
-    rasterizationStateCI.cullMode = VK_CULL_MODE_BACK_BIT;
-    renderingCreateInfo.depthAttachmentFormat = depthFormat;
-    shaderStages[0] = loadShader(getShadersPath() + sceneVertexShaderPath, VK_SHADER_STAGE_VERTEX_BIT);
-    shaderStages[1] = loadShader(getShadersPath() + sceneFragmentShaderPath, VK_SHADER_STAGE_FRAGMENT_BIT);
-    // TODO：PCF管线
-    VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.sceneShadow));
-
-    // shadow pipeline
-    VkPipelineRenderingCreateInfo shadowRenderingInfo{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-    shadowRenderingInfo.colorAttachmentCount = 0;
-    shadowRenderingInfo.pColorAttachmentFormats = nullptr;
-    shadowRenderingInfo.depthAttachmentFormat = shadowMap.format;
-    shadowRenderingInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
-    pipelineCI.pNext = &shadowRenderingInfo;
-    pipelineCI.renderPass = VK_NULL_HANDLE;
-
-    shaderStages[0] = loadShader(getShadersPath() + shadowVertexShaderPath, VK_SHADER_STAGE_VERTEX_BIT);
-    pipelineCI.stageCount = 1;  // 深度图不需要片段着色器
-
-    pipelineCI.pVertexInputState = pSceneVertexInputStateCI;    // 配置输入顶点信息
-
-    colorBlendStateCI.attachmentCount = 0;  // 不需要混合
-    rasterizationStateCI.cullMode = VK_CULL_MODE_NONE; // 深度图关闭剔除
-    depthStencilStateCI.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-    rasterizationStateCI.depthBiasEnable = VK_TRUE;
-    dynamicStateEnables.push_back(VK_DYNAMIC_STATE_DEPTH_BIAS); // 动态修改深度偏移
-    dynamicStateCI = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
-    VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.shadowOffscreen));
-
-    createLightPipeline();
 }
 
-void VulkanExample::createLightPipeline()
+void VulkanExample::createScenePipeline()
 {
-    VkPushConstantRange pushConstantRangeLight = vks::initializers::pushConstantRange(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(PushConstantDataLight), 0);
-
-    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
-    pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
-    pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRangeLight;
-    VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
-
     VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
     VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
     VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
@@ -353,24 +327,22 @@ void VulkanExample::createLightPipeline()
     VkPipelineDynamicStateCreateInfo dynamicStateCI = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
     std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
 
-    // dynamic rendering设置
-    VkPipelineRenderingCreateInfo renderingCreateInfo = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
+    VkPipelineRenderingCreateInfo renderingCreateInfo = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
     renderingCreateInfo.colorAttachmentCount = 1;
     renderingCreateInfo.pColorAttachmentFormats = &swapChain.colorFormat;
     renderingCreateInfo.depthAttachmentFormat = depthFormat;
     renderingCreateInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
 
-    rasterizationStateCI.cullMode = VK_CULL_MODE_NONE;
-    shaderStages[0] = loadShader(getShadersPath() + lightVertexShaderPath, VK_SHADER_STAGE_VERTEX_BIT);
-    shaderStages[1] = loadShader(getShadersPath() + lightFragmentShaderPath, VK_SHADER_STAGE_FRAGMENT_BIT);
+    shaderStages[0] = loadShader(getShadersPath() + sceneVertexShaderPath, VK_SHADER_STAGE_VERTEX_BIT);
+    shaderStages[1] = loadShader(getShadersPath() + sceneFragmentShaderPath, VK_SHADER_STAGE_FRAGMENT_BIT);
 
-    VkGraphicsPipelineCreateInfo pipelineCI = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+    VkGraphicsPipelineCreateInfo pipelineCI = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
     pipelineCI.renderPass = VK_NULL_HANDLE;
     pipelineCI.subpass = 0;
     pipelineCI.pNext = &renderingCreateInfo;
-    // 常规设置
     pipelineCI.layout = pipelineLayout;
     pipelineCI.pInputAssemblyState = &inputAssemblyStateCI;
+    pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::UV, vkglTF::VertexComponent::Color, vkglTF::VertexComponent::Normal });
     pipelineCI.pViewportState = &viewportStateCI;
     pipelineCI.pRasterizationState = &rasterizationStateCI;
     pipelineCI.pColorBlendState = &colorBlendStateCI;
@@ -379,7 +351,87 @@ void VulkanExample::createLightPipeline()
     pipelineCI.pDynamicState = &dynamicStateCI;
     pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
     pipelineCI.pStages = shaderStages.data();
-    pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({vkglTF::VertexComponent::Position});
+
+    VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.sceneShadow));
+}
+
+void VulkanExample::createShadowPipeline()
+{
+    VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
+    VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
+    rasterizationStateCI.depthBiasEnable = VK_TRUE;
+    VkPipelineColorBlendStateCreateInfo colorBlendStateCI = vks::initializers::pipelineColorBlendStateCreateInfo(0, nullptr);
+    VkPipelineDepthStencilStateCreateInfo depthStencilStateCI = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
+    VkPipelineViewportStateCreateInfo viewportStateCI = vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
+    VkPipelineMultisampleStateCreateInfo multisampleStateCI = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT, 0);
+    std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS };
+    VkPipelineDynamicStateCreateInfo dynamicStateCI = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
+    std::array<VkPipelineShaderStageCreateInfo, 1> shaderStages{};
+
+    VkPipelineRenderingCreateInfo renderingCreateInfo = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
+    renderingCreateInfo.colorAttachmentCount = 0;
+    renderingCreateInfo.pColorAttachmentFormats = nullptr;
+    renderingCreateInfo.depthAttachmentFormat = shadowMap.format;
+    renderingCreateInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+
+    shaderStages[0] = loadShader(getShadersPath() + shadowVertexShaderPath, VK_SHADER_STAGE_VERTEX_BIT);
+
+    VkGraphicsPipelineCreateInfo pipelineCI = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+    pipelineCI.renderPass = VK_NULL_HANDLE;
+    pipelineCI.subpass = 0;
+    pipelineCI.pNext = &renderingCreateInfo;
+    pipelineCI.layout = pipelineLayout;
+    pipelineCI.pInputAssemblyState = &inputAssemblyStateCI;
+    pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::UV, vkglTF::VertexComponent::Color, vkglTF::VertexComponent::Normal });
+    pipelineCI.pViewportState = &viewportStateCI;
+    pipelineCI.pRasterizationState = &rasterizationStateCI;
+    pipelineCI.pColorBlendState = &colorBlendStateCI;
+    pipelineCI.pDepthStencilState = &depthStencilStateCI;
+    pipelineCI.pMultisampleState = &multisampleStateCI;
+    pipelineCI.pDynamicState = &dynamicStateCI;
+    pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
+    pipelineCI.pStages = shaderStages.data();
+
+    VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.shadowOffscreen));
+}
+
+void VulkanExample::createLightPipeline()
+{
+    VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
+    VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
+    VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
+    VkPipelineColorBlendStateCreateInfo colorBlendStateCI = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
+    VkPipelineDepthStencilStateCreateInfo depthStencilStateCI = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL);
+    VkPipelineViewportStateCreateInfo viewportStateCI = vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
+    VkPipelineMultisampleStateCreateInfo multisampleStateCI = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT, 0);
+    std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo dynamicStateCI = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
+    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
+
+    VkPipelineRenderingCreateInfo renderingCreateInfo = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
+    renderingCreateInfo.colorAttachmentCount = 1;
+    renderingCreateInfo.pColorAttachmentFormats = &swapChain.colorFormat;
+    renderingCreateInfo.depthAttachmentFormat = depthFormat;
+    renderingCreateInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+
+    shaderStages[0] = loadShader(getShadersPath() + lightVertexShaderPath, VK_SHADER_STAGE_VERTEX_BIT);
+    shaderStages[1] = loadShader(getShadersPath() + lightFragmentShaderPath, VK_SHADER_STAGE_FRAGMENT_BIT);
+
+    VkGraphicsPipelineCreateInfo pipelineCI = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+    pipelineCI.renderPass = VK_NULL_HANDLE;
+    pipelineCI.subpass = 0;
+    pipelineCI.pNext = &renderingCreateInfo;
+    pipelineCI.layout = pipelineLayout;
+    pipelineCI.pInputAssemblyState = &inputAssemblyStateCI;
+    pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position });
+    pipelineCI.pViewportState = &viewportStateCI;
+    pipelineCI.pRasterizationState = &rasterizationStateCI;
+    pipelineCI.pColorBlendState = &colorBlendStateCI;
+    pipelineCI.pDepthStencilState = &depthStencilStateCI;
+    pipelineCI.pMultisampleState = &multisampleStateCI;
+    pipelineCI.pDynamicState = &dynamicStateCI;
+    pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
+    pipelineCI.pStages = shaderStages.data();
 
     VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.lightSphere));
 }
@@ -402,7 +454,6 @@ void VulkanExample::updateLight()
 
 void VulkanExample::updateUniformBuffers()
 {
-    // depth uniform: 更新CPU端再映射到GPU缓存
     glm::mat4 depthProjectionMatrix = glm::ortho(-10.f, 10.f, -10.f, 10.f, shadowNearPlane, shadowFarPlane);
     glm::mat4 depthViewMatrix = glm::lookAt(lightPos, glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     glm::mat4 depthModelMatrix = glm::mat4(1.0f);
@@ -410,7 +461,6 @@ void VulkanExample::updateUniformBuffers()
     memcpy(uniformBuffers[currentBuffer].shadowOffscreenBuffer.allocationInfo.pMappedData, &uniformDataShadow, sizeof(uniformDataShadow));
     vmaFlushAllocation(allocator, uniformBuffers[currentBuffer].shadowOffscreenBuffer.allocation, 0, sizeof(uniformDataShadow));
 
-    // scene uniform
     uniformDataScene.projection = camera.matrices.perspective;
     uniformDataScene.view = camera.matrices.view;
     uniformDataScene.model = glm::mat4(1.0f);
@@ -429,7 +479,6 @@ void VulkanExample::buildCommandBuffer()
     VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
     VK_CHECK_RESULT(vkBeginCommandBuffer(commandBuffer, &cmdBufInfo));
 
-    // shadow map
     vkutil::cmdTransitionImageLayout(commandBuffer, shadowMap.shadowTexture.image.image, shadowMap.shadowTexture.image.layout, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
     shadowMap.shadowTexture.image.layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     drawShadowMap(commandBuffer);
@@ -437,11 +486,7 @@ void VulkanExample::buildCommandBuffer()
     shadowMap.shadowTexture.image.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
     vkutil::cmdTransitionImageLayout(commandBuffer, depthStencil.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
-    // TODO: 场景绘制
-
-
     vkutil::cmdTransitionImageLayout(commandBuffer, swapChain.images[currentImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
-    //drawQuad(commandBuffer);
     drawScene(commandBuffer);
     vkutil::cmdTransitionImageLayout(commandBuffer, swapChain.images[currentImageIndex], VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_ASPECT_COLOR_BIT);
 
@@ -450,14 +495,14 @@ void VulkanExample::buildCommandBuffer()
 
 void VulkanExample::drawShadowMap(VkCommandBuffer commandBuffer)
 {
-    VkRenderingAttachmentInfo depthAttachment { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    VkRenderingAttachmentInfo depthAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
     depthAttachment.imageView = shadowMap.shadowTexture.image.imageView;
     depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    depthAttachment.clearValue.depthStencil = {1.0f, 0};
+    depthAttachment.clearValue.depthStencil = { 1.0f, 0 };
 
-    VkRenderingInfo renderingInfo { VK_STRUCTURE_TYPE_RENDERING_INFO };
+    VkRenderingInfo renderingInfo{ VK_STRUCTURE_TYPE_RENDERING_INFO };
     renderingInfo.renderArea = { 0, 0, shadowMap.extent.width, shadowMap.extent.height };
     renderingInfo.layerCount = 1;
     renderingInfo.colorAttachmentCount = 0;
@@ -551,5 +596,3 @@ void VulkanExample::drawQuad(VkCommandBuffer commandBuffer)
     }
     vkCmdEndRendering(commandBuffer);
 }
-
-// TODO: draw 和 shader & transition

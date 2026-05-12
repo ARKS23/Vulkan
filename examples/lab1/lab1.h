@@ -133,6 +133,11 @@ public:
     void createUniformBuffers();
     void setupDescriptors();
     void createPipelines();
+    void createPipelineLayout();
+    void createDebugPipeline();
+    void createScenePipeline();
+    void createShadowPipeline();
+    void createLightPipeline();
 
     void destroyPipelines();
     void destroyDescriptors();
@@ -147,8 +152,6 @@ public:
     //virtual void windowResized() override;
     void updateLight();
     void updateUniformBuffers();
-
-    void createLightPipeline();
 
     void drawShadowMap(VkCommandBuffer commandBuffer);
     void drawScene(VkCommandBuffer commandBuffer);
