@@ -50,6 +50,11 @@ public:
         int PCFRadius = 3;
     };
 
+    struct PushConstantDataLight {
+        glm::vec4 lightColor = glm::vec4(0.95f, 0.98f, 0.98f, 1.0f);
+        glm::mat4 mvp;
+    };
+
     struct UniformBuffers {
         AllocatedBuffer sceneBuffer;
         AllocatedBuffer shadowOffscreenBuffer;
@@ -58,6 +63,7 @@ public:
     struct Pipelines {
         VkPipeline shadowOffscreen{ VK_NULL_HANDLE };
 		VkPipeline sceneShadow{ VK_NULL_HANDLE };
+        VkPipeline lightSphere{ VK_NULL_HANDLE };
 		// Pipeline with percentage close filtering (PCF) of the shadow map 
 		// VkPipeline sceneShadowPCF{ VK_NULL_HANDLE };
 		VkPipeline debug{ VK_NULL_HANDLE };
@@ -91,6 +97,7 @@ public:
 
     // pushConstant
     PushconstantData pushConstan;
+    PushConstantDataLight pushConstantLight;
 
     // 描述符
     VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
@@ -100,6 +107,7 @@ public:
     std::vector<vkglTF::Model> scenes;
     std::vector<std::string> sceneNames;
     int32_t sceneIndex = 0;
+    vkglTF::Model lightSphere;
 
     // 阴影相关
     ShadowMap shadowMap;
@@ -140,6 +148,8 @@ public:
     void updateLight();
     void updateUniformBuffers();
 
+    void createLightPipeline();
+
     void drawShadowMap(VkCommandBuffer commandBuffer);
     void drawScene(VkCommandBuffer commandBuffer);
     void drawQuad(VkCommandBuffer commandBuffer);
@@ -151,6 +161,8 @@ private:
     const std::string sceneFragmentShaderPath = "lab1/scene.frag.spv";
     const std::string quadVertexShaderPath = "lab1/quad.vert.spv";
     const std::string quadFragmentShaderPath = "lab1/quad.frag.spv";
+    const std::string lightVertexShaderPath = "lab1/light.vert.spv";
+    const std::string lightFragmentShaderPath = "lab1/light.frag.spv";
 
     // model
     const std::string shadowScenePath = "models/vulkanscene_shadow.gltf";

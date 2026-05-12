@@ -56,7 +56,7 @@ void VulkanExample::render()
     if (!prepared)  return;
 
     VulkanExampleBase::prepareFrame();
-    //if (!paused || camera.updated) updateLight();
+    if (!paused || camera.updated) updateLight();
     updateUniformBuffers();
     buildCommandBuffer();
     VulkanExampleBase::submitFrame();
@@ -109,6 +109,8 @@ void VulkanExample::loadAssets()
     scenes[0].loadFromFile(getAssetPath() + shadowScenePath, vulkanDevice, queue, glTFLoadingFlags);
     scenes[1].loadFromFile(getAssetPath() + sampleScenePath, vulkanDevice, queue, glTFLoadingFlags);
     sceneNames = { "Scene1", "Scene2" };
+
+    lightSphere.loadFromFile(getAssetPath() + "models/sphere.gltf", vulkanDevice, queue, glTFLoadingFlags);
 }
 
 void VulkanExample::createShadowResources()
@@ -327,25 +329,75 @@ void VulkanExample::createPipelines()
     dynamicStateEnables.push_back(VK_DYNAMIC_STATE_DEPTH_BIAS); // 动态修改深度偏移
     dynamicStateCI = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
     VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.shadowOffscreen));
+
+    createLightPipeline();
+}
+
+void VulkanExample::createLightPipeline()
+{
+    VkPushConstantRange pushConstantRangeLight = vks::initializers::pushConstantRange(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(PushConstantDataLight), 0);
+
+    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
+    pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+    pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRangeLight;
+    VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
+    VkPipelineRasterizationStateCreateInfo rasterizationStateCI = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
+    VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
+    VkPipelineColorBlendStateCreateInfo colorBlendStateCI = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
+    VkPipelineDepthStencilStateCreateInfo depthStencilStateCI = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
+    VkPipelineViewportStateCreateInfo viewportStateCI = vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
+    VkPipelineMultisampleStateCreateInfo multisampleStateCI = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT, 0);
+    std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo dynamicStateCI = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
+    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
+
+    // dynamic rendering设置
+    VkPipelineRenderingCreateInfo renderingCreateInfo = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
+    renderingCreateInfo.colorAttachmentCount = 1;
+    renderingCreateInfo.pColorAttachmentFormats = &swapChain.colorFormat;
+    renderingCreateInfo.depthAttachmentFormat = depthFormat;
+    renderingCreateInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+
+    rasterizationStateCI.cullMode = VK_CULL_MODE_NONE;
+    shaderStages[0] = loadShader(getShadersPath() + lightVertexShaderPath, VK_SHADER_STAGE_VERTEX_BIT);
+    shaderStages[1] = loadShader(getShadersPath() + lightFragmentShaderPath, VK_SHADER_STAGE_FRAGMENT_BIT);
+
+    VkGraphicsPipelineCreateInfo pipelineCI = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+    pipelineCI.renderPass = VK_NULL_HANDLE;
+    pipelineCI.subpass = 0;
+    pipelineCI.pNext = &renderingCreateInfo;
+    // 常规设置
+    pipelineCI.layout = pipelineLayout;
+    pipelineCI.pInputAssemblyState = &inputAssemblyStateCI;
+    pipelineCI.pViewportState = &viewportStateCI;
+    pipelineCI.pRasterizationState = &rasterizationStateCI;
+    pipelineCI.pColorBlendState = &colorBlendStateCI;
+    pipelineCI.pDepthStencilState = &depthStencilStateCI;
+    pipelineCI.pMultisampleState = &multisampleStateCI;
+    pipelineCI.pDynamicState = &dynamicStateCI;
+    pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
+    pipelineCI.pStages = shaderStages.data();
+    pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({vkglTF::VertexComponent::Position});
+
+    VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.lightSphere));
 }
 
 void VulkanExample::destroyPipelines()
 {
     vkDestroyPipeline(device, pipelines.debug, nullptr);
     vkDestroyPipeline(device, pipelines.sceneShadow, nullptr);
+    vkDestroyPipeline(device, pipelines.lightSphere, nullptr);
     vkDestroyPipeline(device, pipelines.shadowOffscreen, nullptr);
     vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 }
 
 void VulkanExample::updateLight()
 {
-    float deltaTime = 0.01f * 0.5f;
-    rotationAngle += rotationSpeed * deltaTime;
-    if (rotationAngle > 2 * 3.1415926f) rotationAngle -= 2 * 3.1415926f;
-
-    float newX = lightRadius * std::sin(rotationAngle);
-    float newY = lightRadius * std::cos(rotationAngle);
-    lightPos = glm::vec3(newX, newY, 3.f);
+    glm::mat4 model = glm::translate(glm::mat4(1.0f), lightPos) * glm::scale(glm::mat4(1.0f), glm::vec3(0.2f));
+    pushConstantLight.mvp = camera.matrices.perspective * camera.matrices.view * model;
+    pushConstantLight.lightColor = pushConstan.lightColor;
 }
 
 void VulkanExample::updateUniformBuffers()
@@ -461,6 +513,10 @@ void VulkanExample::drawScene(VkCommandBuffer commandBuffer)
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer].scene, 0, nullptr);
         vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushconstantData), &pushConstan);
         scenes[sceneIndex].draw(commandBuffer);
+
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.lightSphere);
+        vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstantDataLight), &pushConstantLight);
+        lightSphere.draw(commandBuffer);
         drawUI(commandBuffer);
     }
     vkCmdEndRendering(commandBuffer);
