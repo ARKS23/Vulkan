@@ -42,6 +42,14 @@ public:
         glm::mat4 depthMVP;
     };
 
+    struct PushconstantData {
+        glm::vec4 lightColor = glm::vec4(0.95f, 0.98f, 0.98f, 1.0f);
+        float minShadowBias = 0.001f;
+        float slopeShadowBias = 0.001f;
+        int enablePCF = 1;
+        int PCFRadius = 3;
+    };
+
     struct UniformBuffers {
         AllocatedBuffer sceneBuffer;
         AllocatedBuffer shadowOffscreenBuffer;
@@ -81,6 +89,9 @@ public:
     // UBO
     std::array<UniformBuffers, maxConcurrentFrames> uniformBuffers;
 
+    // pushConstant
+    PushconstantData pushConstan;
+
     // 描述符
     VkDescriptorSetLayout descriptorSetLayout{ VK_NULL_HANDLE };
     std::array<DescriptorSets, maxConcurrentFrames> descriptorSets;
@@ -93,12 +104,13 @@ public:
     // 阴影相关
     ShadowMap shadowMap;
     float shadowNearPlane = 0.1f, shadowFarPlane = 50.f;
-    float depthBiasConstants = 1.25f;
+    float depthBiasConstant = 1.25f;
+    float depthBiasSlope = 1.75f;
 
     // 光源
     float rotationAngle = 0.0f;
     float rotationSpeed = 0.01f;
-    float lightRadius = 8.f;
+    float lightRadius = 5.f;
     glm::vec3 lightPos = glm::vec3(4.0f, -7.f, 3.f);
 
 public:
@@ -123,6 +135,7 @@ public:
     void buildCommandBuffer();
     virtual void render() override;
     virtual void prepare() override;
+    virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay) override;
     //virtual void windowResized() override;
     void updateLight();
     void updateUniformBuffers();

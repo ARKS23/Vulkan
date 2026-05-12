@@ -4,7 +4,7 @@
 VulkanExample::VulkanExample()
 {
     title = "Lab1: shadow mapping";
-    settings.overlay = false;
+    //settings.overlay = false;
 
     apiVersion = VK_API_VERSION_1_3;
     useDynamicRendering = true;
@@ -56,10 +56,26 @@ void VulkanExample::render()
     if (!prepared)  return;
 
     VulkanExampleBase::prepareFrame();
-    if (!paused || camera.updated) updateLight();
+    //if (!paused || camera.updated) updateLight();
     updateUniformBuffers();
     buildCommandBuffer();
     VulkanExampleBase::submitFrame();
+}
+
+void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay *overlay) {
+    if (overlay->header("Settings")) {
+        overlay->comboBox("Scenes", &sceneIndex, sceneNames);
+        overlay->colorPicker("Light color", &pushConstan.lightColor.x);
+        overlay->sliderFloat("Min Bias", &pushConstan.minShadowBias, 0.0f, 0.01f);
+        overlay->sliderFloat("Slope Bias", &pushConstan.slopeShadowBias, 0.0f, 0.05f);
+        overlay->sliderFloat("Raster Bias", &depthBiasConstant, 0.0f, 5.0f);
+        overlay->sliderFloat("Raster Slope", &depthBiasSlope, 0.0f, 5.0f);
+        overlay->sliderInt("EnablePCF", &pushConstan.enablePCF, 0, 1);
+        overlay->sliderInt("PCF Radius", &pushConstan.PCFRadius, 1, 3);
+        overlay->sliderFloat("Light X", &lightPos.x, -20.0f, 20.0f);
+        overlay->sliderFloat("Light Y", &lightPos.y, -20.0f, 20.0f);
+        overlay->sliderFloat("Light Z", &lightPos.z, -20.0f, 20.0f);
+    }
 }
 
 void VulkanExample::createVmaAllocator()
@@ -226,8 +242,13 @@ void VulkanExample::destroyDescriptors()
 
 void VulkanExample::createPipelines()
 {
+    // push constants
+    VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(PushconstantData), 0);
+
     // 复用一个 pipeline Layout
     VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayout, 1);
+    pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+    pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
     VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelineLayout));
 
     // pipeline 细节设置
@@ -279,7 +300,7 @@ void VulkanExample::createPipelines()
     VkPipelineVertexInputStateCreateInfo *pSceneVertexInputStateCI = vkglTF::Vertex::getPipelineVertexInputState({vkglTF::VertexComponent::Position, vkglTF::VertexComponent::UV, vkglTF::VertexComponent::Color, vkglTF::VertexComponent::Normal});
     pipelineCI.pVertexInputState = pSceneVertexInputStateCI;
     rasterizationStateCI.cullMode = VK_CULL_MODE_BACK_BIT;
-    renderingCreateInfo.depthAttachmentFormat = shadowMap.format;
+    renderingCreateInfo.depthAttachmentFormat = depthFormat;
     shaderStages[0] = loadShader(getShadersPath() + sceneVertexShaderPath, VK_SHADER_STAGE_VERTEX_BIT);
     shaderStages[1] = loadShader(getShadersPath() + sceneFragmentShaderPath, VK_SHADER_STAGE_FRAGMENT_BIT);
     // TODO：PCF管线
@@ -318,12 +339,12 @@ void VulkanExample::destroyPipelines()
 
 void VulkanExample::updateLight()
 {
-    float deltaTime = 0.01f;
+    float deltaTime = 0.01f * 0.5f;
     rotationAngle += rotationSpeed * deltaTime;
     if (rotationAngle > 2 * 3.1415926f) rotationAngle -= 2 * 3.1415926f;
 
-    float newX = lightRadius * std::cos(rotationAngle);
-    float newY = lightRadius * std::sin(rotationAngle);
+    float newX = lightRadius * std::sin(rotationAngle);
+    float newY = lightRadius * std::cos(rotationAngle);
     lightPos = glm::vec3(newX, newY, 3.f);
 }
 
@@ -357,11 +378,13 @@ void VulkanExample::buildCommandBuffer()
     VK_CHECK_RESULT(vkBeginCommandBuffer(commandBuffer, &cmdBufInfo));
 
     // shadow map
-    vkutil::cmdTransitionImageLayout(commandBuffer, shadowMap.shadowTexture.image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
+    vkutil::cmdTransitionImageLayout(commandBuffer, shadowMap.shadowTexture.image.image, shadowMap.shadowTexture.image.layout, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
     shadowMap.shadowTexture.image.layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     drawShadowMap(commandBuffer);
     vkutil::cmdTransitionImageLayout(commandBuffer, shadowMap.shadowTexture.image.image, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
     shadowMap.shadowTexture.image.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+    vkutil::cmdTransitionImageLayout(commandBuffer, depthStencil.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
     // TODO: 场景绘制
 
 
@@ -398,6 +421,7 @@ void VulkanExample::drawShadowMap(VkCommandBuffer commandBuffer)
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.shadowOffscreen);
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer].offscreen, 0, nullptr);
+        vkCmdSetDepthBias(commandBuffer, depthBiasConstant, 0.0f, depthBiasSlope);
         scenes[sceneIndex].draw(commandBuffer);
     }
     vkCmdEndRendering(commandBuffer);
@@ -435,7 +459,9 @@ void VulkanExample::drawScene(VkCommandBuffer commandBuffer)
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.sceneShadow);
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentBuffer].scene, 0, nullptr);
+        vkCmdPushConstants(commandBuffer, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushconstantData), &pushConstan);
         scenes[sceneIndex].draw(commandBuffer);
+        drawUI(commandBuffer);
     }
     vkCmdEndRendering(commandBuffer);
 }

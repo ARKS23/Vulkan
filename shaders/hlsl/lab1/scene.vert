@@ -12,7 +12,7 @@ struct VSOutput {
     [[vk::location(2)]] float3 baseColor : COLOR0;
     [[vk::location(3)]] float4 cameraPos : POSITION1;
     [[vk::location(4)]] float4 lightPos : POSITION2;
-    [[vk::location(5)]] float4 ShadowCoord : TEXCOORD0;
+    [[vk::location(5)]] float4 lightSpacePos : TEXCOORD0;
 };
 
 struct UBO {
@@ -37,6 +37,6 @@ VSOutput main(VSInput input) {
     output.baseColor = input.color;
     output.cameraPos = ubo.cameraPos;
     output.lightPos = ubo.lightPos;
-    output.ShadowCoord = mul(ubo.depthBiasMVP, output.worldPos);
+    output.lightSpacePos = mul(ubo.depthBiasMVP, output.worldPos);
     return output;
 }
