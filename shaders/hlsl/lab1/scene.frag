@@ -18,11 +18,20 @@ struct PushconstantData {
     float slopeShadowBias;
     int enablePCF;
     int PCFRadius;
+    int debugMode;
 };
 [[vk::push_constant]] PushconstantData pushConstan;
 
 Texture2D depthTexture : register(t1);
 SamplerState depthSampler : register(s1); 
+
+struct DebugData {
+    float shadow;
+    float2 shadowUV;
+    float currentDepth;
+    float closetDepth;
+    float shadowBias;
+};
 
 float computeBias(float3 N, float3 L) {
     float ndotL = saturate(dot(N, L));
@@ -54,7 +63,7 @@ float calculatePCF(float2 shadowUV, float currentDepth, float bias, int radius =
     return shadow / float(sampleCount);
 }
 
-float calculateShadow(FSInput input, float3 N, float3 L) {
+float calculateShadow(FSInput input, float3 N, float3 L, out DebugData debugData) {
     float3 shadowCoord = input.lightSpacePos.xyz / input.lightSpacePos.w;
     float2 shadowUV = shadowCoord.xy * 0.5 + 0.5; // 将[-1, 1]范围的坐标转换为[0, 1]
     if (shadowUV.x < 0.0 || shadowUV.x > 1.0 ||  // 有效性检查
@@ -62,6 +71,10 @@ float calculateShadow(FSInput input, float3 N, float3 L) {
         shadowCoord.z < 0.0 || shadowCoord.z > 1.0) {
         return 0.0;
     }
+    debugData.shadowUV = shadowUV; // 调试数据
+    debugData.currentDepth = shadowCoord.z; // 调试数据
+    debugData.shadowBias = computeBias(N, L); // 调试数据
+    debugData.closetDepth = depthTexture.Sample(depthSampler, shadowUV).r; // 调试数据
 
     float currentDepth = shadowCoord.z;
     float shadowBias = computeBias(N, L);
@@ -75,7 +88,34 @@ float calculateShadow(FSInput input, float3 N, float3 L) {
     else {
         shadow = shadowCompare(shadowUV, currentDepth, shadowBias);
     }
+    debugData.shadow = shadow; // 调试数据
+
     return shadow;
+}
+
+float4 debugOutput(float4 normalColor, FSInput input, DebugData debugData) {
+    if (pushConstan.debugMode == 0) {   // 正常渲染
+        return normalColor;
+    }
+    else if (pushConstan.debugMode == 1) {  // 阴影部分显示为黑色，非阴影部分显示为白色
+        return float4((1.0 - debugData.shadow), (1.0 - debugData.shadow), (1.0 - debugData.shadow),1.0);
+    }
+    else if (pushConstan.debugMode == 2) {  // 显示阴影贴图坐标
+        return float4(debugData.shadowUV, 0, 1);
+    }
+    else if (pushConstan.debugMode == 3) {  // 显示当前片元深度
+        return float4(debugData.currentDepth, debugData.currentDepth, debugData.currentDepth, 1);
+    }
+    else if (pushConstan.debugMode == 4) {  // 显示最近的深度
+        return float4(debugData.closetDepth, debugData.closetDepth, debugData.closetDepth, 1);
+    }
+    else if (pushConstan.debugMode == 5) {  // 显示阴影偏移
+        return float4((debugData.shadowBias * 100.0), (debugData.shadowBias * 100.0), (debugData.shadowBias * 100.0), 1.0);
+    }
+    else if (pushConstan.debugMode == 6) {  // 法线可视化
+        return float4(normalize(input.normal) * 0.5 + 0.5, 1);
+    }
+    return normalColor;
 }
 
 
@@ -87,6 +127,8 @@ FSOutput main(FSInput input) {
     float3 L = normalize(input.lightPos.xyz - input.worldPos.xyz);
     float3 V = normalize(input.cameraPos.xyz - input.worldPos.xyz);
     float3 H = normalize(L + V);
+
+    DebugData debugData; // 调试数据
 
     // 环境光
     float ambientStrength = 0.2f;
@@ -100,10 +142,10 @@ FSOutput main(FSInput input) {
     float spec = pow(max(dot(H, N), 0.0), shiness) * specularStrength;
     float3 specular = lightColor * spec;
     // 阴影计算
-    float shadow = calculateShadow(input, N, L);
+    float shadow = calculateShadow(input, N, L, debugData);
     // bling-phong result
     float3 phongColor = ambient + (1 - shadow) * (diffuse + specular);
     
-    output.color = float4(phongColor.xyz, 1);
+    output.color = debugOutput(float4(phongColor, 1.0), input, debugData);
     return output;
 }

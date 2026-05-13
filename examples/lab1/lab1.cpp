@@ -66,6 +66,10 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay *overlay)
 {
     if (overlay->header("Settings")) {
         overlay->comboBox("Scenes", &sceneIndex, sceneNames);
+        overlay->comboBox("Debug Mode", &pushConstan.debugMode, 
+            { "Normal Rende", "Shadow Mask", "Shadow UV",
+             "Current Depth", "Closest Depth", "Shadow Bias", 
+            "Normal Visualization"});
     }
 
     if (overlay->header("Light Settings")) {

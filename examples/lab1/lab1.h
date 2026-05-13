@@ -48,6 +48,7 @@ public:
         float slopeShadowBias = 0.001f;
         int enablePCF = 1;
         int PCFRadius = 3;
+        int debugMode = 0;
     };
 
     struct PushConstantDataLight {
