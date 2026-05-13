@@ -85,7 +85,9 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay *overlay)
         overlay->sliderFloat("Raster Bias", &depthBiasConstant, 0.0f, 5.0f);
         overlay->sliderFloat("Raster Slope", &depthBiasSlope, 0.0f, 5.0f);
         overlay->sliderInt("EnablePCF", &pushConstan.enablePCF, 0, 1);
-        overlay->sliderInt("PCF Radius", &pushConstan.PCFRadius, 1, 3);
+        overlay->sliderInt("Use Possion Disk", &pushConstan.usePoissonDisk, 0, 1);
+        overlay->sliderInt("Poisson Sample Count", &pushConstan.PoissonSampleCount, 1, 16);
+        overlay->sliderInt("PCF Radius", &pushConstan.PCFRadius, 1, 8);
     }
 }
 

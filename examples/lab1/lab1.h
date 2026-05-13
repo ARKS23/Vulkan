@@ -48,6 +48,8 @@ public:
         float slopeShadowBias = 0.001f;
         int enablePCF = 1;
         int PCFRadius = 3;
+        int usePoissonDisk = 1;
+        int PoissonSampleCount = 4;
         int debugMode = 0;
     };
 
