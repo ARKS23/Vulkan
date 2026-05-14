@@ -118,7 +118,10 @@ float findAvgBlockerDepth (float2 shadowUV, float currentDepth, float bias, floa
 
     [unroll]
     for (int i = 0; i < pushConstan.PoissonSampleCount; ++i) {
-        float2 sampleUV = shadowUV + poissonDisk[i] * texelSize * searchRadius;
+        float2 offset = poissonDisk[i] * searchRadius * texelSize;
+        float angle = random01(shadowUV * 4096) * 6.2831853;
+        offset = rotate2D(offset, angle);
+        float2 sampleUV = shadowUV + offset;
         if (sampleUV.x < 0.0 || sampleUV.x > 1.0 || sampleUV.y < 0.0 || sampleUV.y > 1.0) continue;  // 越界无效值检查
 
         float sampleDepth = depthTexture.Sample(depthSampler, sampleUV).r;
@@ -230,7 +233,7 @@ FSOutput main(FSInput input) {
     float diff = max(dot(L, N), 0.0);
     float3 diffuse = lightColor * input.baseColor * diff;
     // 高光: 只有光源颜色
-    float shiness = 32;
+    float shiness = 64;
     float specularStrength = 0.8;
     float spec = pow(max(dot(H, N), 0.0), shiness) * specularStrength;
     float3 specular = lightColor * spec;

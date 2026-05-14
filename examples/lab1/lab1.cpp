@@ -6,6 +6,9 @@ VulkanExample::VulkanExample()
     title = "Lab1: shadow mapping";
     //settings.overlay = false;
 
+    width = 1920;
+    height = 1080;
+
     apiVersion = VK_API_VERSION_1_3;
     useDynamicRendering = true;
     vulkan13Features.dynamicRendering = VK_TRUE;
@@ -75,9 +78,10 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay *overlay)
     if (overlay->header("Light Settings")) {
         overlay->colorPicker("Light color", &pushConstan.lightColor.x);
         overlay->sliderFloat("LightSize", &pushConstan.lightSize, 0.1f, 40.0f);
-        overlay->sliderFloat("Light X", &lightPos.x, -20.0f, 20.0f);
-        overlay->sliderFloat("Light Y", &lightPos.y, -20.0f, 20.0f);
-        overlay->sliderFloat("Light Z", &lightPos.z, -20.0f, 20.0f);
+        overlay->sliderFloat("Light Radius", &lightRadius, 0.1f, 20.0f);
+        // overlay->sliderFloat("Light X", &lightPos.x, -20.0f, 20.0f);
+        // overlay->sliderFloat("Light Y", &lightPos.y, -20.0f, 20.0f);
+        // overlay->sliderFloat("Light Z", &lightPos.z, -20.0f, 20.0f);
     }
 
     if (overlay->header("Shadow Settings")) {
@@ -454,6 +458,10 @@ void VulkanExample::destroyPipelines()
 
 void VulkanExample::updateLight()
 {
+    rotationAngle += rotationSpeed * 0.025;
+    lightPos.x = sin(rotationAngle) * lightRadius;
+    lightPos.z = cos(rotationAngle) * lightRadius;
+
     glm::mat4 model = glm::translate(glm::mat4(1.0f), lightPos) * glm::scale(glm::mat4(1.0f), glm::vec3(0.085f * pushConstan.lightSize));
     pushConstantLight.mvp = camera.matrices.perspective * camera.matrices.view * model;
     pushConstantLight.lightColor = pushConstan.lightColor;
