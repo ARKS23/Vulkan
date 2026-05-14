@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="360" viewBox="0 0 960 360">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#2d3748"/>
+    </marker>
+    <style>
+      .title { font: 700 24px sans-serif; fill: #1a202c; }
+      .label { font: 600 16px sans-serif; fill: #1a202c; }
+      .small { font: 13px sans-serif; fill: #4a5568; }
+      .box { fill: #f7fafc; stroke: #2d3748; stroke-width: 2; rx: 14; }
+      .pass { fill: #edf2f7; stroke: #4a5568; stroke-width: 2; rx: 16; }
+      .tex { fill: #ebf8ff; stroke: #2b6cb0; stroke-width: 2; rx: 14; }
+      .out { fill: #f0fff4; stroke: #2f855a; stroke-width: 2; rx: 14; }
+      .arrow { stroke: #2d3748; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="960" height="360" fill="#ffffff"/>
+  <text class="title" x="32" y="42">Shadow Mapping Data Flow</text>
+
+  <rect class="box" x="40" y="95" width="150" height="90" rx="14"/>
+  <text class="label" x="70" y="128">CPU Update</text>
+  <text class="small" x="62" y="154">camera matrix</text>
+  <text class="small" x="62" y="174">light matrix + UI</text>
+
+  <rect class="pass" x="250" y="80" width="175" height="120" rx="16"/>
+  <text class="label" x="288" y="118">Shadow Pass</text>
+  <text class="small" x="278" y="146">view from light</text>
+  <text class="small" x="278" y="166">write depth only</text>
+
+  <rect class="tex" x="485" y="88" width="180" height="104" rx="14"/>
+  <text class="label" x="512" y="126">Shadow Map</text>
+  <text class="small" x="524" y="154">depth texture</text>
+  <text class="small" x="520" y="174">sampled in scene</text>
+
+  <rect class="pass" x="725" y="80" width="185" height="120" rx="16"/>
+  <text class="label" x="766" y="118">Scene Pass</text>
+  <text class="small" x="750" y="146">view from camera</text>
+  <text class="small" x="750" y="166">compare light depth</text>
+
+  <rect class="out" x="380" y="250" width="210" height="72" rx="14"/>
+  <text class="label" x="423" y="284">Final Image</text>
+  <text class="small" x="410" y="306">lighting + shadow mask</text>
+
+  <path class="arrow" d="M190 140 H245"/>
+  <path class="arrow" d="M425 140 H480"/>
+  <path class="arrow" d="M665 140 H720"/>
+  <path class="arrow" d="M818 200 C818 252, 610 286, 595 286"/>
+
+  <text class="small" x="262" y="235">depthBiasMVP = lightProjection * lightView * model</text>
+  <path class="arrow" d="M330 220 C380 240, 455 245, 485 250"/>
+</svg>

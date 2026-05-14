@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="430" viewBox="0 0 960 430">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#2d3748"/>
+    </marker>
+    <linearGradient id="shadowGrad" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0%" stop-color="#111827" stop-opacity="0.85"/>
+      <stop offset="35%" stop-color="#111827" stop-opacity="0.65"/>
+      <stop offset="100%" stop-color="#111827" stop-opacity="0.12"/>
+    </linearGradient>
+    <style>
+      .title { font: 700 24px sans-serif; fill: #1a202c; }
+      .label { font: 700 17px sans-serif; fill: #1a202c; }
+      .small { font: 13px sans-serif; fill: #4a5568; }
+      .box { fill: #f7fafc; stroke: #2d3748; stroke-width: 2; rx: 16; }
+      .arrow { stroke: #2d3748; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .ground { fill: #edf2f7; stroke: #4a5568; stroke-width: 2; }
+      .caster { fill: #4a5568; stroke: #1a202c; stroke-width: 2; }
+    </style>
+  </defs>
+
+  <rect width="960" height="430" fill="#ffffff"/>
+  <text class="title" x="32" y="42">PCSS: Blocker Search to Variable Radius PCF</text>
+
+  <rect class="box" x="60" y="80" width="230" height="110" rx="16"/>
+  <text class="label" x="105" y="118">1. Blocker Search</text>
+  <text class="small" x="86" y="148">find depths closer than receiver</text>
+  <text class="small" x="95" y="168">average blocker depth</text>
+
+  <rect class="box" x="365" y="80" width="230" height="110" rx="16"/>
+  <text class="label" x="410" y="118">2. Penumbra Size</text>
+  <text class="small" x="401" y="148">receiver - blocker distance</text>
+  <text class="small" x="430" y="168">scaled by light size</text>
+
+  <rect class="box" x="670" y="80" width="230" height="110" rx="16"/>
+  <text class="label" x="707" y="118">3. Variable PCF</text>
+  <text class="small" x="700" y="148">larger radius farther away</text>
+  <text class="small" x="717" y="168">soft shadow edge</text>
+
+  <path class="arrow" d="M290 135 H360"/>
+  <path class="arrow" d="M595 135 H665"/>
+
+  <rect class="ground" x="105" y="320" width="735" height="34" rx="4"/>
+  <rect class="caster" x="220" y="245" width="70" height="75" rx="8"/>
+  <ellipse cx="390" cy="337" rx="180" ry="34" fill="url(#shadowGrad)"/>
+
+  <line x1="245" y1="245" x2="155" y2="210" stroke="#ecc94b" stroke-width="3"/>
+  <circle cx="140" cy="204" r="16" fill="#f6e05e" stroke="#b7791f" stroke-width="2"/>
+  <text class="small" x="105" y="192">area light</text>
+
+  <text class="label" x="210" y="385">hard contact</text>
+  <text class="label" x="520" y="385">soft far edge</text>
+  <path class="arrow" d="M315 378 H505"/>
+</svg>

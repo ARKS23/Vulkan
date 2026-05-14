@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420">
+  <defs>
+    <style>
+      .title { font: 700 24px sans-serif; fill: #1a202c; }
+      .label { font: 700 18px sans-serif; fill: #1a202c; }
+      .small { font: 14px sans-serif; fill: #4a5568; }
+      .panel { fill: #f7fafc; stroke: #2d3748; stroke-width: 2; rx: 18; }
+      .grid { stroke: #cbd5e0; stroke-width: 1.5; }
+      .sample { fill: #2b6cb0; }
+      .poisson { fill: #c53030; }
+      .ring { fill: none; stroke: #718096; stroke-width: 2; stroke-dasharray: 6 6; }
+    </style>
+  </defs>
+
+  <rect width="960" height="420" fill="#ffffff"/>
+  <text class="title" x="32" y="42">Grid PCF vs Poisson PCF</text>
+
+  <rect class="panel" x="70" y="80" width="360" height="280" rx="18"/>
+  <text class="label" x="185" y="120">Grid PCF</text>
+  <text class="small" x="134" y="145">samples grow with radius squared</text>
+
+  <g transform="translate(150,172)">
+    <rect x="0" y="0" width="200" height="140" fill="#ffffff" stroke="#a0aec0" stroke-width="2"/>
+    <line class="grid" x1="40" y1="0" x2="40" y2="140"/>
+    <line class="grid" x1="80" y1="0" x2="80" y2="140"/>
+    <line class="grid" x1="120" y1="0" x2="120" y2="140"/>
+    <line class="grid" x1="160" y1="0" x2="160" y2="140"/>
+    <line class="grid" x1="0" y1="28" x2="200" y2="28"/>
+    <line class="grid" x1="0" y1="56" x2="200" y2="56"/>
+    <line class="grid" x1="0" y1="84" x2="200" y2="84"/>
+    <line class="grid" x1="0" y1="112" x2="200" y2="112"/>
+    <g>
+      <circle class="sample" cx="40" cy="28" r="5"/><circle class="sample" cx="80" cy="28" r="5"/><circle class="sample" cx="120" cy="28" r="5"/><circle class="sample" cx="160" cy="28" r="5"/>
+      <circle class="sample" cx="40" cy="56" r="5"/><circle class="sample" cx="80" cy="56" r="5"/><circle class="sample" cx="120" cy="56" r="5"/><circle class="sample" cx="160" cy="56" r="5"/>
+      <circle class="sample" cx="40" cy="84" r="5"/><circle class="sample" cx="80" cy="84" r="5"/><circle class="sample" cx="120" cy="84" r="5"/><circle class="sample" cx="160" cy="84" r="5"/>
+      <circle class="sample" cx="40" cy="112" r="5"/><circle class="sample" cx="80" cy="112" r="5"/><circle class="sample" cx="120" cy="112" r="5"/><circle class="sample" cx="160" cy="112" r="5"/>
+    </g>
+  </g>
+
+  <rect class="panel" x="530" y="80" width="360" height="280" rx="18"/>
+  <text class="label" x="642" y="120">Poisson PCF</text>
+  <text class="small" x="594" y="145">fixed sparse samples over larger radius</text>
+
+  <g transform="translate(625,160)">
+    <circle class="ring" cx="85" cy="85" r="82"/>
+    <circle class="poisson" cx="20" cy="52" r="6"/>
+    <circle class="poisson" cx="150" cy="25" r="6"/>
+    <circle class="poisson" cx="78" cy="14" r="6"/>
+    <circle class="poisson" cx="113" cy="110" r="6"/>
+    <circle class="poisson" cx="19" cy="125" r="6"/>
+    <circle class="poisson" cx="35" cy="22" r="6"/>
+    <circle class="poisson" cx="55" cy="108" r="6"/>
+    <circle class="poisson" cx="160" cy="145" r="6"/>
+    <circle class="poisson" cx="118" cy="15" r="6"/>
+    <circle class="poisson" cx="132" cy="55" r="6"/>
+    <circle class="poisson" cx="68" cy="56" r="6"/>
+    <circle class="poisson" cx="148" cy="86" r="6"/>
+    <circle class="poisson" cx="70" cy="166" r="6"/>
+    <circle class="poisson" cx="28" cy="154" r="6"/>
+    <circle class="poisson" cx="104" cy="150" r="6"/>
+    <circle class="poisson" cx="92" cy="78" r="6"/>
+  </g>
+
+  <text class="small" x="126" y="388">Example: radius 4 = 81 samples</text>
+  <text class="small" x="593" y="388">Example: radius 8 with 16 samples</text>
+</svg>
