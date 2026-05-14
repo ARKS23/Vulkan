@@ -46,7 +46,8 @@ public:
         glm::vec4 lightColor = glm::vec4(0.95f, 0.98f, 0.98f, 1.0f);
         float minShadowBias = 0.001f;
         float slopeShadowBias = 0.001f;
-        int enablePCF = 1;
+        int shadowMode = 0;
+        float lightSize = 3.0f;
         int PCFRadius = 3;
         int usePoissonDisk = 1;
         int PoissonSampleCount = 4;
@@ -80,7 +81,7 @@ public:
     
     struct ShadowMap {
         AllocatedTexture shadowTexture;
-        VkExtent2D extent {2048, 2048};
+        VkExtent2D extent {4096, 4096};
         VkFormat format { VK_FORMAT_D16_UNORM };
     };
 

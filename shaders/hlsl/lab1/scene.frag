@@ -16,7 +16,8 @@ struct PushconstantData {
     float4 lightColor;
     float minShadowBias;
     float slopeShadowBias;
-    int enablePCF;
+    int shadowMode;
+    float lightSize;
     int PCFRadius;
     int usePoissonDisk;
     int PoissonSampleCount;
@@ -56,6 +57,18 @@ static const float2 poissonDisk[16] = {
     float2( 0.14383161, -0.14100790)
 };
 
+float random01(float2 p) {
+    // 白噪声函数，基于sin和dot的哈希函数，生成一个0到1之间的随机数
+    return frac(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453);
+}
+
+float2 rotate2D(float2 v, float angle) {
+    // 逆时针二维旋转矩阵，三角函数公式推导出来
+    float cosAngle = cos(angle);
+    float sinAngle = sin(angle);
+    return float2(v.x * cosAngle - v.y * sinAngle, v.x * sinAngle + v.y * cosAngle);
+}
+
 float computeBias(float3 N, float3 L) {
     float ndotL = saturate(dot(N, L));
     float bias = max(pushConstan.minShadowBias, pushConstan.slopeShadowBias * (1 - ndotL));
@@ -67,7 +80,7 @@ float shadowCompare(float2 uv, float currentDepth, float bias) {
     return currentDepth - bias > closetDepth ? 1.0 : 0.0;
 }
 
-float calculatePCF(float2 shadowUV, float currentDepth, float bias, int radius = 3) {
+float calculatePCF(float2 shadowUV, float currentDepth, float bias, float radius = 3) {
     uint shadowWidth;
     uint shadowHeight;
     depthTexture.GetDimensions(shadowWidth, shadowHeight);  // 获取尺寸
@@ -81,6 +94,8 @@ float calculatePCF(float2 shadowUV, float currentDepth, float bias, int radius =
         [unroll]
         for (int i = 0; i < sampleCount; ++i) {
             float2 offset = poissonDisk[i] * radius * texelSize;
+            float angle = random01(shadowUV * 4096) * 6.2831853;
+            offset = rotate2D(offset, angle); // 随机旋转，减少重复采样带来的伪影
             shadow += shadowCompare(shadowUV + offset, currentDepth, bias);
         }
     }
@@ -94,6 +109,48 @@ float calculatePCF(float2 shadowUV, float currentDepth, float bias, int radius =
         }
     }
     return shadow / float(sampleCount);
+}
+
+// PCSS平均遮挡深度计算
+float findAvgBlockerDepth (float2 shadowUV, float currentDepth, float bias, float2 texelSize, float searchRadius) {
+    float blockerDepthSum = 0.0f;
+    int blockerCount = 0;
+
+    [unroll]
+    for (int i = 0; i < pushConstan.PoissonSampleCount; ++i) {
+        float2 sampleUV = shadowUV + poissonDisk[i] * texelSize * searchRadius;
+        if (sampleUV.x < 0.0 || sampleUV.x > 1.0 || sampleUV.y < 0.0 || sampleUV.y > 1.0) continue;  // 越界无效值检查
+
+        float sampleDepth = depthTexture.Sample(depthSampler, sampleUV).r;
+        if (sampleDepth < currentDepth - bias) {
+            blockerDepthSum += sampleDepth;
+            blockerCount++;
+        }
+    }
+
+    if (blockerCount == 0) return -1.0; // 无遮挡物，完全受光
+
+    return blockerDepthSum / blockerCount;
+}
+
+float calculatePCSS(float2 shadowUV, float currentDepth, float bias) {
+    uint shadowWidth;
+    uint shadowHeight;
+    depthTexture.GetDimensions(shadowWidth, shadowHeight);  // 获取尺寸
+    float2 texelSize = 1.0 / float2(shadowWidth, shadowHeight);
+    float searchRadius = 16.0f; // 硬编码搜索半径
+
+    // 遮挡物搜索，获取平均遮挡物深度
+    float avgBlockDepth = findAvgBlockerDepth(shadowUV, currentDepth, bias, texelSize, searchRadius);
+    if (avgBlockDepth < 0.0f) return 0.0f; // 无遮挡物，完全受光
+
+    // 根据平均遮挡物深度计算PCF采样半径
+    float penumbraRatio = (currentDepth - avgBlockDepth) / avgBlockDepth;
+    float fliterRadius = penumbraRatio * pushConstan.lightSize * searchRadius; // 相似三角形推导出的公式变形
+    fliterRadius = clamp(fliterRadius, 0.0f, 32); // 硬编码半径范围
+
+    // PCF
+    return calculatePCF(shadowUV, currentDepth, bias, fliterRadius);
 }
 
 float calculateShadow(FSInput input, float3 N, float3 L, out DebugData debugData) {
@@ -111,15 +168,18 @@ float calculateShadow(FSInput input, float3 N, float3 L, out DebugData debugData
 
     float currentDepth = shadowCoord.z;
     float shadowBias = computeBias(N, L);
-    int enablePCF = pushConstan.enablePCF;
     int PCFRadius = pushConstan.PCFRadius;
+    int shadowMode = pushConstan.shadowMode;
     
     float shadow = 0.0f;
-    if (enablePCF) {
+    if (shadowMode == 0) {      // Hard shadow
+        shadow = shadowCompare(shadowUV, currentDepth, shadowBias);
+    }
+    else if (shadowMode == 1) {  // PCF
         shadow = calculatePCF(shadowUV, currentDepth, shadowBias, PCFRadius);
     }
-    else {
-        shadow = shadowCompare(shadowUV, currentDepth, shadowBias);
+    else if (shadowMode == 2) {  // PCSS
+        shadow = calculatePCSS(shadowUV, currentDepth, shadowBias);
     }
     debugData.shadow = shadow; // 调试数据
 

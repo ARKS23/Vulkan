@@ -74,6 +74,7 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay *overlay)
 
     if (overlay->header("Light Settings")) {
         overlay->colorPicker("Light color", &pushConstan.lightColor.x);
+        overlay->sliderFloat("LightSize", &pushConstan.lightSize, 0.1f, 40.0f);
         overlay->sliderFloat("Light X", &lightPos.x, -20.0f, 20.0f);
         overlay->sliderFloat("Light Y", &lightPos.y, -20.0f, 20.0f);
         overlay->sliderFloat("Light Z", &lightPos.z, -20.0f, 20.0f);
@@ -84,7 +85,7 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay *overlay)
         overlay->sliderFloat("Slope Bias", &pushConstan.slopeShadowBias, 0.0f, 0.05f);
         overlay->sliderFloat("Raster Bias", &depthBiasConstant, 0.0f, 5.0f);
         overlay->sliderFloat("Raster Slope", &depthBiasSlope, 0.0f, 5.0f);
-        overlay->sliderInt("EnablePCF", &pushConstan.enablePCF, 0, 1);
+        overlay->comboBox("Shadow Mode", &pushConstan.shadowMode, {"Hard Shadow", "PCF", "PCSS"});
         overlay->sliderInt("Use Possion Disk", &pushConstan.usePoissonDisk, 0, 1);
         overlay->sliderInt("Poisson Sample Count", &pushConstan.PoissonSampleCount, 1, 16);
         overlay->sliderInt("PCF Radius", &pushConstan.PCFRadius, 1, 8);
@@ -453,7 +454,7 @@ void VulkanExample::destroyPipelines()
 
 void VulkanExample::updateLight()
 {
-    glm::mat4 model = glm::translate(glm::mat4(1.0f), lightPos) * glm::scale(glm::mat4(1.0f), glm::vec3(0.2f));
+    glm::mat4 model = glm::translate(glm::mat4(1.0f), lightPos) * glm::scale(glm::mat4(1.0f), glm::vec3(0.085f * pushConstan.lightSize));
     pushConstantLight.mvp = camera.matrices.perspective * camera.matrices.view * model;
     pushConstantLight.lightColor = pushConstan.lightColor;
 }
@@ -469,7 +470,7 @@ void VulkanExample::updateUniformBuffers()
 
     uniformDataScene.projection = camera.matrices.perspective;
     uniformDataScene.view = camera.matrices.view;
-    uniformDataScene.model = glm::mat4(1.0f);
+    uniformDataScene.model = glm::scale(glm::mat4(1.0f), glm::vec3(1.5f));
     uniformDataScene.lightPos = glm::vec4(lightPos, 1.0f);
     uniformDataScene.cameraPos = camera.viewPos;
     uniformDataScene.depthBiasMVP = uniformDataShadow.depthMVP;
