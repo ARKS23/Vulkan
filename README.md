@@ -9,3 +9,6 @@ A comprehensive collection of open source C++ examples for [Vulkan®](https://ww
 ### Lab1 : Shadow mapping
 - [Lab1文档](examples\lab1\README.md)
 - 展示
+https://github.com/user-attachments/assets/c6d4ad54-c4fb-4a4c-b212-20ca4c8ed60c
+
+
