@@ -541,6 +541,7 @@ void VulkanExample::drawShadowMap(VkCommandBuffer commandBuffer)
 
 void VulkanExample::drawScene(VkCommandBuffer commandBuffer)
 {
+    // 后续这部分进行封装，减少代码量
     VkRenderingAttachmentInfo colorAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
     colorAttachment.imageView = swapChain.imageViews[currentImageIndex];
     colorAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;

@@ -12,7 +12,11 @@ list(APPEND BASE_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/vk_resources.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/vk_resources.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/vk_images.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vk_images.cpp")
+    "${CMAKE_CURRENT_SOURCE_DIR}/vk_images.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vk_rendering.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vk_rendering.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vk_descriptors.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vk_descriptors.cpp")
 list(REMOVE_DUPLICATES BASE_SRC)
 
 set(KTX_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/ktx)
