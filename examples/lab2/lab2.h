@@ -72,22 +72,33 @@ public:
     struct UniformBuffers {
         AllocatedBuffer matricesBuffer;
         AllocatedBuffer lightBuffer;
+        AllocatedBuffer lightSourceMatricesBuffer;
+    };
+
+    struct PushconstantsLight {
+        glm::vec4 Pos;
+        glm::vec4 Color;
+        glm::vec4 Intensity;
     };
 
     struct Piplelines {
         VkPipeline scenePipeline = {VK_NULL_HANDLE};
+        VkPipeline lightPipeline = {VK_NULL_HANDLE};
     };
 
     struct PipelinesLayout {
         VkPipelineLayout scenePipelineLayout = {VK_NULL_HANDLE};
+        VkPipelineLayout lightPipelineLayout = {VK_NULL_HANDLE};
     };
 
     struct DescriptorSets {
         VkDescriptorSet sceneDescriptor{ VK_NULL_HANDLE };
+        VkDescriptorSet lightDescriptor{ VK_NULL_HANDLE };
     };
 
     struct DescriptorSetLayouts {
         VkDescriptorSetLayout sceneDescriptorSetLayout{ VK_NULL_HANDLE };
+        VkDescriptorSetLayout lightDescriptorSetLayout{ VK_NULL_HANDLE };
     };
 
 public:
@@ -105,16 +116,24 @@ public:
     // UBO
     UniformDataMatrices UBOMatrix;
     UniformDataLights UBOLights;
+    UniformDataMatrices UBOLightSourceMatrix;
     std::array<UniformBuffers, maxConcurrentFrames> uniformBuffersScene;
 
     // push constant
-    Material defaultMaterial = Material("Default", glm::vec3(0.15f, 0.28f, 0.78f), 0.1f, 1.0f);
     glm::vec3 objectPos = {0.0f, 0.0f, 0.0f};
+    PushconstantsLight pushconstantsLight;
 
     // 场景
     std::vector<vkglTF::Model> objects;
     int32_t objectIndex = 0;
     std::vector<std::string> objectNames;
+    std::vector<Material> materials;
+    std::vector<std::string> materialNames;
+    int32_t materialIndex = 0;
+
+
+    // 光源
+    vkglTF::Model lightObject;
     
 public:
     VulkanExample();
@@ -133,6 +152,8 @@ public:
 
     void createScenePipelineLayout();
     void createScenePipeline();
+    void createLightPipelineLayout();
+    void createLightPipeline();
 
     virtual void render() override;
     virtual void prepare() override;
@@ -142,10 +163,14 @@ public:
     void buildCommandBuffer();
 
     void cmdDrawSecne(VkCommandBuffer cmd);
+    void cmdDrawLight(VkCommandBuffer cmd);
 
 private:
     const std::string pbrSceneVertexShader = "lab2/pbrScene.vert.spv";
     const std::string pbrSceneFragmentShader = "lab2/pbrScene.frag.spv";
+
+    const std::string lightVertexShader = "lab2/light.vert.spv";
+    const std::string lightFragmentShader = "lab2/light.frag.spv";
 };
 
 VULKAN_EXAMPLE_MAIN();
