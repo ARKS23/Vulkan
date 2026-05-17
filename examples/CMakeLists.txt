@@ -187,6 +187,7 @@ set(EXAMPLES
 	vulkanscene
 	lab0
 	lab1
+	lab2
 )
 
 buildExamples()

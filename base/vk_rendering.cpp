@@ -19,14 +19,14 @@ namespace vkutil {
         return attachmentInfo;
     }
 
-    VkRenderingAttachmentInfo depthAttachmentInfo(VkImageView imageView, VkImageLayout imageLayout, VkClearValue clearValue,
+    VkRenderingAttachmentInfo renderingdepthAttachmentInfo(VkImageView imageView, VkImageLayout imageLayout, float clearValue,
         VkAttachmentLoadOp loadOp, VkAttachmentStoreOp storeOp) {
         VkRenderingAttachmentInfo attachmentInfo{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
         attachmentInfo.imageView = imageView;
         attachmentInfo.imageLayout = imageLayout;
         attachmentInfo.loadOp = loadOp;
         attachmentInfo.storeOp = storeOp;
-        attachmentInfo.clearValue = clearValue;
+        attachmentInfo.clearValue.depthStencil = {clearValue, 0};
         return attachmentInfo;
     }
 
@@ -61,5 +61,9 @@ namespace vkutil {
         renderingInfo.pDepthAttachment = nullptr;
         renderingInfo.pStencilAttachment = nullptr;
         vkCmdBeginRendering(cmd, &renderingInfo);
+    }
+
+    void cmdEndRendering(VkCommandBuffer cmd) {
+        vkCmdEndRendering(cmd);
     }
 }

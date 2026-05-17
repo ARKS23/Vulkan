@@ -7,7 +7,7 @@ namespace vkutil {
     VkRenderingAttachmentInfo renderingAttachmentInfo(VkImageView imageView, VkImageLayout imageLayout, VkClearValue clearValue, 
         VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE);
 
-    VkRenderingAttachmentInfo depthAttachmentInfo(VkImageView imageView, VkImageLayout imageLayout, VkClearValue clearValue,
+    VkRenderingAttachmentInfo renderingdepthAttachmentInfo(VkImageView imageView, VkImageLayout imageLayout, float clearValue,
         VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR, VkAttachmentStoreOp storeOp = VK_ATTACHMENT_STORE_OP_STORE);
 
     void cmdBeginColorDepthRendering(
@@ -25,4 +25,6 @@ namespace vkutil {
         VkCommandBuffer cmd,
         VkExtent2D extent,
         const VkRenderingAttachmentInfo& colorAttachment);
+
+    void cmdEndRendering(VkCommandBuffer cmd);
 }
