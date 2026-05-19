@@ -13,7 +13,6 @@ struct UBOMatrix {
     float4x4 projection;
     float4x4 model;
     float4x4 view;
-    float3 camPos;
 };
 ConstantBuffer<UBOMatrix> matrices : register(b0, space0);
 

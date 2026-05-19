@@ -69,10 +69,24 @@ public:
         glm::vec4 lightIntensity[4];
     };
 
+    struct UniformDataSkyBox {
+        glm::mat4 projection;
+        glm::mat4 model;
+        glm::mat4 view;
+    };
+
     struct UniformBuffers {
         AllocatedBuffer matricesBuffer;
         AllocatedBuffer lightBuffer;
         AllocatedBuffer lightSourceMatricesBuffer;
+        AllocatedBuffer skyBoxMatricesBuffer;
+    };
+
+    struct Textures {
+        vks::TextureCubeMap environmentCubeMap;
+        vks::TextureCubeMap irradianceCubeMap;
+        vks::TextureCubeMap prefilteredCubeMap;
+        vks::Texture2D brdfLUT;
     };
 
     struct PushconstantsLight {
@@ -83,21 +97,25 @@ public:
 
     struct Piplelines {
         VkPipeline scenePipeline = {VK_NULL_HANDLE};
+        VkPipeline skyboxPipeline = {VK_NULL_HANDLE};
         VkPipeline lightPipeline = {VK_NULL_HANDLE};
     };
 
     struct PipelinesLayout {
         VkPipelineLayout scenePipelineLayout = {VK_NULL_HANDLE};
+        VkPipelineLayout skyboxPipelineLayout = {VK_NULL_HANDLE};
         VkPipelineLayout lightPipelineLayout = {VK_NULL_HANDLE};
     };
 
     struct DescriptorSets {
         VkDescriptorSet sceneDescriptor{ VK_NULL_HANDLE };
+        VkDescriptorSet skyboxDescriptor{ VK_NULL_HANDLE };
         VkDescriptorSet lightDescriptor{ VK_NULL_HANDLE };
     };
 
     struct DescriptorSetLayouts {
         VkDescriptorSetLayout sceneDescriptorSetLayout{ VK_NULL_HANDLE };
+        VkDescriptorSetLayout skyboxDescriptorSetLayout{ VK_NULL_HANDLE };
         VkDescriptorSetLayout lightDescriptorSetLayout{ VK_NULL_HANDLE };
     };
 
@@ -117,6 +135,7 @@ public:
     UniformDataMatrices UBOMatrix;
     UniformDataLights UBOLights;
     UniformDataMatrices UBOLightSourceMatrix;
+    UniformDataSkyBox UBOSkyBox;
     std::array<UniformBuffers, maxConcurrentFrames> uniformBuffersScene;
 
     // push constant
@@ -131,6 +150,11 @@ public:
     std::vector<std::string> materialNames;
     int32_t materialIndex = 0;
 
+    // 天空盒顶点
+    vkglTF::Model skyboxCube;
+
+    // 纹理
+    Textures textures;
 
     // 光源
     vkglTF::Model lightObject;
@@ -148,10 +172,13 @@ public:
     void destroyPipelines();
     void destroyDescriptors();
     void destroyUniformBuffers();
+    void destroyAssets();
     void destroyVmaAllocator();
 
     void createScenePipelineLayout();
     void createScenePipeline();
+    void createSkyboxPipelineLayout();
+    void createSkyboxPipeline();
     void createLightPipelineLayout();
     void createLightPipeline();
 
@@ -164,6 +191,7 @@ public:
 
     void cmdDrawSecne(VkCommandBuffer cmd);
     void cmdDrawLight(VkCommandBuffer cmd);
+    void cmdDrawSkybox(VkCommandBuffer cmd);
 
 private:
     const std::string pbrSceneVertexShader = "lab2/pbrScene.vert.spv";
@@ -171,6 +199,11 @@ private:
 
     const std::string lightVertexShader = "lab2/light.vert.spv";
     const std::string lightFragmentShader = "lab2/light.frag.spv";
+
+    const std::string skyboxVertexShader = "lab2/skybox.vert.spv";
+    const std::string skyboxFragmentShader = "lab2/skybox.frag.spv";
+
+    const std::string hdrFilePath = "textures/hdr/pisa_cube.ktx";
 };
 
 VULKAN_EXAMPLE_MAIN();

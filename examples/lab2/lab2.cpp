@@ -51,6 +51,7 @@ VulkanExample::~VulkanExample() {
         destroyPipelines();
         destroyDescriptors();
         destroyUniformBuffers();
+        destroyAssets();
         destroyVmaAllocator();
     }
 }
@@ -91,7 +92,16 @@ void VulkanExample::loadAssets() {
         objects[i].loadFromFile(path, vulkanDevice, queue, vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY);
     }
 
+    // 光源物体模型
     lightObject.loadFromFile(getAssetPath() + "models/sphere.gltf", vulkanDevice, queue, vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY);
+
+    // IBL 天空盒纹理和顶点
+    textures.environmentCubeMap.loadFromFile(getAssetPath() + hdrFilePath, VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
+    skyboxCube.loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, vkglTF::FileLoadingFlags::PreTransformVertices);
+}
+
+void VulkanExample::destroyAssets() {
+    textures.environmentCubeMap.destroy();
 }
 
 void VulkanExample::createUniformBuffers() {
@@ -119,6 +129,14 @@ void VulkanExample::createUniformBuffers() {
             VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
             VMA_MEMORY_USAGE_AUTO
         );
+
+        buffer.skyBoxMatricesBuffer = vkutil::createAllocatedBuffer(
+            allocator, 
+            sizeof(UniformDataSkyBox),
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+            VMA_MEMORY_USAGE_AUTO
+        );
     }
 }
 
@@ -127,36 +145,46 @@ void VulkanExample::destroyUniformBuffers() {
         vkutil::destroyAllocatedBuffer(allocator, buffer.matricesBuffer);
         vkutil::destroyAllocatedBuffer(allocator, buffer.lightBuffer);
         vkutil::destroyAllocatedBuffer(allocator, buffer.lightSourceMatricesBuffer);
+        vkutil::destroyAllocatedBuffer(allocator, buffer.skyBoxMatricesBuffer);
     }
 }
 
 void VulkanExample::setupDescriptors() {
     // Pool
     std::vector<VkDescriptorPoolSize> poolSizes = {
-        vkutil::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, maxConcurrentFrames * 4)
+        vkutil::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, maxConcurrentFrames * 8),
+        vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxConcurrentFrames * 6)
     };
-    VkDescriptorPoolCreateInfo poolCI = vkutil::descriptorPoolCreateInfo(poolSizes, maxConcurrentFrames * 2);
+    VkDescriptorPoolCreateInfo poolCI = vkutil::descriptorPoolCreateInfo(poolSizes, maxConcurrentFrames * 8);
     VK_CHECK_RESULT(vkCreateDescriptorPool(device, &poolCI, nullptr, &descriptorPool));
 
-    // Layout
-    std::vector<VkDescriptorSetLayoutBinding> bindingLayout = {
+    // -------------------------------------------------------- Layout --------------------------------------------------------
+    std::vector<VkDescriptorSetLayoutBinding> bindingLayout = { // 场景管线layout
         vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
         vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT , 1)
     };
     VkDescriptorSetLayoutCreateInfo layoutCI = vkutil::descriptorSetLayoutCreateInfo(bindingLayout);
     VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &layoutCI, nullptr, &descriptorSetLayouts.sceneDescriptorSetLayout));
 
-    std::vector<VkDescriptorSetLayoutBinding> lightBindingLayout = {
+    std::vector<VkDescriptorSetLayoutBinding> skyboxLayout = {  // 天空盒管线layout
+        vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0),
+        vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1)
+    };
+    VkDescriptorSetLayoutCreateInfo skyboxLayoutCI = vkutil::descriptorSetLayoutCreateInfo(skyboxLayout);
+    VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &skyboxLayoutCI, nullptr, &descriptorSetLayouts.skyboxDescriptorSetLayout));
+
+    std::vector<VkDescriptorSetLayoutBinding> lightBindingLayout = {   // 光源管线layout
         vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0)
     };
     VkDescriptorSetLayoutCreateInfo lightLayoutCI = vkutil::descriptorSetLayoutCreateInfo(lightBindingLayout);
     VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &lightLayoutCI, nullptr, &descriptorSetLayouts.lightDescriptorSetLayout));
 
-    // Alloc Info
+    // -------------------------------------------------------- Alloc Info --------------------------------------------------------
     VkDescriptorSetAllocateInfo allocInfo = vkutil::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.sceneDescriptorSetLayout, 1);
+    VkDescriptorSetAllocateInfo skyboxAllocInfo = vkutil::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.skyboxDescriptorSetLayout, 1);
     VkDescriptorSetAllocateInfo LightAllocInfo = vkutil::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.lightDescriptorSetLayout, 1);
 
-    // set & write & update
+    // -------------------------------------------------------- set & write & update --------------------------------------------------------
     for (int i = 0; i < uniformBuffersScene.size(); ++i) {
         VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].sceneDescriptor));
         VkDescriptorBufferInfo matricesBufferInfo = vkutil::descriptorBufferInfo(uniformBuffersScene[i].matricesBuffer.handle, sizeof(UniformDataMatrices), 0);
@@ -167,8 +195,17 @@ void VulkanExample::setupDescriptors() {
         };
         vkutil::updateDescriptorSet(device, writes);
 
-        VkDescriptorBufferInfo lightMatricesBufferInfo = vkutil::descriptorBufferInfo(uniformBuffersScene[i].lightSourceMatricesBuffer.handle, sizeof(UniformDataMatrices), 0);
+        VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &skyboxAllocInfo, &descriptorSets[i].skyboxDescriptor));
+        VkDescriptorBufferInfo skyboxMatricesBufferInfo = vkutil::descriptorBufferInfo(uniformBuffersScene[i].skyBoxMatricesBuffer.handle, sizeof(UniformDataSkyBox), 0);
+        VkDescriptorImageInfo skyboxImageInfo = vkutil::descriptorImageInfo(textures.environmentCubeMap.sampler, textures.environmentCubeMap.view, textures.environmentCubeMap.imageLayout);
+        std::vector<VkWriteDescriptorSet> skyboxWrites = {
+            vkutil::writeUniformBuffer(descriptorSets[i].skyboxDescriptor, 0, &skyboxMatricesBufferInfo),
+            vkutil::writeCombinedImageSampler(descriptorSets[i].skyboxDescriptor, 1, &skyboxImageInfo)
+        };
+        vkutil::updateDescriptorSet(device, skyboxWrites);
+
         VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &LightAllocInfo, &descriptorSets[i].lightDescriptor));
+        VkDescriptorBufferInfo lightMatricesBufferInfo = vkutil::descriptorBufferInfo(uniformBuffersScene[i].lightSourceMatricesBuffer.handle, sizeof(UniformDataMatrices), 0);
         std::vector<VkWriteDescriptorSet> lightWrites = {
             vkutil::writeUniformBuffer(descriptorSets[i].lightDescriptor, 0, &lightMatricesBufferInfo)
         };
@@ -187,6 +224,11 @@ void VulkanExample::destroyDescriptors() {
         descriptorSetLayouts.lightDescriptorSetLayout = VK_NULL_HANDLE;
     }
 
+    if (descriptorSetLayouts.skyboxDescriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.skyboxDescriptorSetLayout, nullptr);
+        descriptorSetLayouts.skyboxDescriptorSetLayout = VK_NULL_HANDLE;
+    }
+
     if (descriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
         descriptorPool = VK_NULL_HANDLE;
@@ -196,6 +238,8 @@ void VulkanExample::destroyDescriptors() {
 void VulkanExample::createPipelines() {
     createScenePipelineLayout();
     createScenePipeline();
+    createSkyboxPipelineLayout();
+    createSkyboxPipeline();
     createLightPipelineLayout();
     createLightPipeline();
 }
@@ -209,6 +253,16 @@ void VulkanExample::destroyPipelines() {
         vkDestroyPipelineLayout(device, pipelinesLayout.scenePipelineLayout, nullptr);
         pipelinesLayout.scenePipelineLayout = VK_NULL_HANDLE;
     }
+
+    if (pipelines.skyboxPipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device, pipelines.skyboxPipeline, nullptr);
+        pipelines.skyboxPipeline = VK_NULL_HANDLE;
+    }
+    if (pipelinesLayout.skyboxPipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device, pipelinesLayout.skyboxPipelineLayout, nullptr);
+        pipelinesLayout.skyboxPipelineLayout = VK_NULL_HANDLE;
+    }
+
     if (pipelines.lightPipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(device, pipelines.lightPipeline, nullptr);
         pipelines.lightPipeline = VK_NULL_HANDLE;
@@ -271,6 +325,52 @@ void VulkanExample::createScenePipeline() {
     VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.scenePipeline));
 }
 
+void VulkanExample::createSkyboxPipelineLayout() {
+    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayouts.skyboxDescriptorSetLayout, 1);
+     VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelinesLayout.skyboxPipelineLayout));
+}
+
+void VulkanExample::createSkyboxPipeline() {
+    VkPipelineInputAssemblyStateCreateInfo inputAssemblyState =  vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
+    VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
+    VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
+    VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL);
+    VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1);
+    VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
+    std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
+
+    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{
+        loadShader(getShadersPath() + skyboxVertexShader, VK_SHADER_STAGE_VERTEX_BIT),
+        loadShader(getShadersPath() + skyboxFragmentShader, VK_SHADER_STAGE_FRAGMENT_BIT)
+    };
+
+    VkPipelineRenderingCreateInfo renderingCreateInfo = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
+    renderingCreateInfo.colorAttachmentCount = 1;
+    renderingCreateInfo.pColorAttachmentFormats = &swapChain.colorFormat;
+    renderingCreateInfo.depthAttachmentFormat = depthFormat;
+    renderingCreateInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+
+    VkGraphicsPipelineCreateInfo pipelineCI = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+    pipelineCI.pNext = &renderingCreateInfo;
+    pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
+    pipelineCI.pStages = shaderStages.data();
+    pipelineCI.pInputAssemblyState = &inputAssemblyState;
+    pipelineCI.pRasterizationState = &rasterizationState;
+    pipelineCI.pColorBlendState = &colorBlendState;
+    pipelineCI.pDepthStencilState = &depthStencilState;
+    pipelineCI.pViewportState = &viewportState;
+    pipelineCI.pMultisampleState = &multisampleState;
+    pipelineCI.pDynamicState = &dynamicState;
+    pipelineCI.layout = pipelinesLayout.skyboxPipelineLayout;
+    pipelineCI.renderPass = renderPass;
+    pipelineCI.subpass = 0;
+    pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position });
+
+    VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.skyboxPipeline));
+}
+
 void VulkanExample::createLightPipelineLayout() {
     VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayouts.lightDescriptorSetLayout, 1);
     std::vector<VkPushConstantRange> pushConstantRanges = {
@@ -286,7 +386,7 @@ void VulkanExample::createLightPipeline() {
     VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE);
     VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
     VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
-    VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL);
+    VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
     VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1);
     VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
     std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
@@ -363,6 +463,13 @@ void VulkanExample::updateUniformBuffers() {
     UBOLightSourceMatrix.view = camera.matrices.view;
     memcpy(uniformBuffersScene[currentBuffer].lightSourceMatricesBuffer.allocationInfo.pMappedData, &UBOLightSourceMatrix, sizeof(UBOLightSourceMatrix));
     vmaFlushAllocation(allocator, uniformBuffersScene[currentBuffer].lightSourceMatricesBuffer.allocation, 0, sizeof(UBOLightSourceMatrix));
+
+    // 天空盒数据
+    UBOSkyBox.model = glm::mat4(1.0f);
+    UBOSkyBox.projection = camera.matrices.perspective;
+    UBOSkyBox.view = glm::mat4(glm::mat3(camera.matrices.view)); // 去除平移分量
+    memcpy(uniformBuffersScene[currentBuffer].skyBoxMatricesBuffer.allocationInfo.pMappedData, &UBOSkyBox, sizeof(UBOSkyBox));
+    vmaFlushAllocation(allocator, uniformBuffersScene[currentBuffer].skyBoxMatricesBuffer.allocation, 0, sizeof(UBOSkyBox));
 }
 
 void VulkanExample::render() {
@@ -384,6 +491,7 @@ void VulkanExample::buildCommandBuffer() {
     vkutil::cmdTransitionImageLayout(commandBuffer, swapChain.images[currentImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
     cmdDrawSecne(commandBuffer);
     cmdDrawLight(commandBuffer);
+    cmdDrawSkybox(commandBuffer);
     vkutil::cmdTransitionImageLayout(commandBuffer, swapChain.images[currentImageIndex], VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_ASPECT_COLOR_BIT);
 
     VK_CHECK_RESULT(vkEndCommandBuffer(commandBuffer));
@@ -422,8 +530,6 @@ void VulkanExample::cmdDrawSecne(VkCommandBuffer cmd) {
                 objects[objectIndex].draw(cmd);
             }
         }
-
-        drawUI(cmd);
     }
     vkutil::cmdEndRendering(cmd);
 }
@@ -439,7 +545,8 @@ void VulkanExample::cmdDrawLight(VkCommandBuffer cmd) {
     VkRenderingAttachmentInfo depthAttachment = vkutil::renderingdepthAttachmentInfo(
         depthStencil.view,
         VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-        1.0f
+        1.0f,
+        VK_ATTACHMENT_LOAD_OP_LOAD
     );
 
     VkExtent2D extent = VkExtent2D{width, height};
@@ -456,6 +563,34 @@ void VulkanExample::cmdDrawLight(VkCommandBuffer cmd) {
             vkCmdPushConstants(cmd, pipelinesLayout.lightPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pushconstantsLight), &pushconstantsLight);
             lightObject.draw(cmd);
         }
+    }
+    vkutil::cmdEndRendering(cmd);
+}
+
+void VulkanExample::cmdDrawSkybox(VkCommandBuffer cmd) {
+    VkRenderingAttachmentInfo colorAttachment = vkutil::renderingAttachmentInfo(
+        swapChain.imageViews[currentImageIndex],
+        VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        VkClearValue{{ 0.01f, 0.02f, 0.025f, 1.0f }},
+        VK_ATTACHMENT_LOAD_OP_LOAD
+    );
+    
+    VkRenderingAttachmentInfo depthAttachment = vkutil::renderingdepthAttachmentInfo(
+        depthStencil.view,
+        VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+        1.0f,
+        VK_ATTACHMENT_LOAD_OP_LOAD
+    );
+
+    VkExtent2D extent = VkExtent2D{width, height};
+    vkutil::cmdBeginColorDepthRendering(cmd, extent, colorAttachment, depthAttachment);
+    {
+        vkutil::cmdSetViewportAndScissor(cmd, extent.width, extent.height);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.skyboxPipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelinesLayout.skyboxPipelineLayout, 0, 1, 
+                                &descriptorSets[currentBuffer].skyboxDescriptor, 0, nullptr);
+        skyboxCube.draw(cmd);
+        drawUI(cmd);
     }
     vkutil::cmdEndRendering(cmd);
 }
