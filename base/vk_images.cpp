@@ -51,6 +51,65 @@ namespace vkutil {
 
         return image;
     }
+
+    AllocatedCubeTexture createAllocatedCubeTexture(VkDevice device,
+            VmaAllocator allocator,
+            uint32_t dim,
+            uint32_t mipLevels,
+            VkFormat format,
+            VkImageUsageFlags usage,
+            VkImageLayout descriptorLayout)
+    {
+        AllocatedCubeTexture texture{};
+        texture.width = dim;
+        texture.height = dim;
+        texture.mipLevels = mipLevels;
+        texture.format = format;
+        texture.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        VkImageCreateInfo imageCI{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+        imageCI.imageType = VK_IMAGE_TYPE_2D;
+        imageCI.format = format;
+        imageCI.extent = { dim, dim, 1 };
+        imageCI.mipLevels = mipLevels;
+        imageCI.arrayLayers = 6;
+        imageCI.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageCI.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imageCI.usage = usage | VK_IMAGE_USAGE_SAMPLED_BIT;
+        imageCI.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        imageCI.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+
+        VmaAllocationCreateInfo allocCI{};
+        allocCI.usage = VMA_MEMORY_USAGE_AUTO;
+        allocCI.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
+        VK_CHECK_RESULT(vmaCreateImage(allocator, &imageCI, &allocCI, &texture.image, &texture.allocation, &texture.allocationInfo));
+
+        VkImageViewCreateInfo viewCI{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+        viewCI.image = texture.image;
+        viewCI.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+        viewCI.format = format;
+        viewCI.subresourceRange = cubeSubresourceRange(mipLevels);
+        VK_CHECK_RESULT(vkCreateImageView(device, &viewCI, nullptr, &texture.view));
+
+        VkSamplerCreateInfo samplerCI{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+        samplerCI.magFilter = VK_FILTER_LINEAR;
+        samplerCI.minFilter = VK_FILTER_LINEAR;
+        samplerCI.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerCI.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        samplerCI.minLod = 0.0f;
+        samplerCI.maxLod = static_cast<float>(mipLevels);
+        samplerCI.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+        VK_CHECK_RESULT(vkCreateSampler(device, &samplerCI, nullptr, &texture.sampler));
+
+        texture.descriptor.sampler = texture.sampler;
+        texture.descriptor.imageView = texture.view;
+        texture.descriptor.imageLayout = descriptorLayout;
+
+        return texture;
+    }
     
     void destroyAllocatedImage(VkDevice device,
             VmaAllocator allocator,
@@ -71,12 +130,72 @@ namespace vkutil {
         image.format = VK_FORMAT_UNDEFINED;
         image.layout = VK_IMAGE_LAYOUT_UNDEFINED;
     }
+
+    void destroyAllocatedCubeTexture(VkDevice device,
+            VmaAllocator allocator,
+            AllocatedCubeTexture& texture)
+    {
+        if (texture.sampler != VK_NULL_HANDLE) {
+            vkDestroySampler(device, texture.sampler, nullptr);
+            texture.sampler = VK_NULL_HANDLE;
+        }
+
+        if (texture.view != VK_NULL_HANDLE) {
+            vkDestroyImageView(device, texture.view, nullptr);
+            texture.view = VK_NULL_HANDLE;
+        }
+
+        if (texture.image != VK_NULL_HANDLE) {
+            vmaDestroyImage(allocator, texture.image, texture.allocation);
+            texture.image = VK_NULL_HANDLE;
+            texture.allocation = VK_NULL_HANDLE;
+        }
+
+        texture.allocationInfo = {};
+        texture.descriptor = {};
+        texture.format = VK_FORMAT_UNDEFINED;
+        texture.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        texture.width = 0;
+        texture.height = 0;
+        texture.mipLevels = 1;
+    }
+
+    VkImageSubresourceRange cubeSubresourceRange(
+            uint32_t mipLevels,
+            uint32_t baseMipLevel,
+            uint32_t baseArrayLayer,
+            uint32_t layerCount)
+    {
+        VkImageSubresourceRange range{};
+        range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        range.baseMipLevel = baseMipLevel;
+        range.levelCount = mipLevels;
+        range.baseArrayLayer = baseArrayLayer;
+        range.layerCount = layerCount;
+        return range;
+    }
     
     void cmdTransitionImageLayout(VkCommandBuffer cmd,
             VkImage image,
             VkImageLayout oldLayout,
             VkImageLayout newLayout,
             VkImageAspectFlags aspectMask)
+    {
+        VkImageSubresourceRange subresourceRange{};
+        subresourceRange.aspectMask = aspectMask;
+        subresourceRange.baseMipLevel = 0;
+        subresourceRange.levelCount = 1;
+        subresourceRange.baseArrayLayer = 0;
+        subresourceRange.layerCount = 1;
+
+        cmdTransitionImageLayout(cmd, image, oldLayout, newLayout, subresourceRange);
+    }
+
+    void cmdTransitionImageLayout(VkCommandBuffer cmd,
+            VkImage image,
+            VkImageLayout oldLayout,
+            VkImageLayout newLayout,
+            VkImageSubresourceRange subresourceRange)
     {
         // 使用 synchronization2，让 stage/access 的对应关系更显式，后续扩展 offscreen/shadow 会更清楚。
         VkImageMemoryBarrier2 imageBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
@@ -85,11 +204,7 @@ namespace vkutil {
         imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         imageBarrier.image = image;
-        imageBarrier.subresourceRange.aspectMask = aspectMask;
-        imageBarrier.subresourceRange.baseMipLevel = 0;
-        imageBarrier.subresourceRange.levelCount = 1;
-        imageBarrier.subresourceRange.baseArrayLayer = 0;
-        imageBarrier.subresourceRange.layerCount = 1;
+        imageBarrier.subresourceRange = subresourceRange;
 
         // UNDEFINED -> TRANSFER_DST_OPTIMAL
         if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
@@ -125,6 +240,20 @@ namespace vkutil {
             imageBarrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
             imageBarrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
             imageBarrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+        }
+        // ATTACHMENT_OPTIMAL -> TRANSFER_SRC_OPTIMAL
+        else if (oldLayout == VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
+            imageBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            imageBarrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+            imageBarrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+            imageBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+        }
+        // TRANSFER_SRC_OPTIMAL -> ATTACHMENT_OPTIMAL
+        else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL) {
+            imageBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+            imageBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+            imageBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            imageBarrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
         }
         // ATTACHMENT_OPTIMAL -> PRESENT_SRC_KHR
         else if (oldLayout == VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {

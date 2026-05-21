@@ -84,9 +84,9 @@ public:
 
     struct Textures {
         vks::TextureCubeMap environmentCubeMap;
-        vks::TextureCubeMap irradianceCubeMap;
-        vks::TextureCubeMap prefilteredCubeMap;
-        vks::Texture2D brdfLUT;
+        AllocatedCubeTexture irradianceCubeMap;
+        AllocatedCubeTexture prefilteredCubeMap;
+        AllocatedTexture brdfLUT;
     };
 
     struct PushconstantsLight {
@@ -165,6 +165,7 @@ public:
 
     void createVmaAllocator();
     void loadAssets();
+    void createDescriptorsPool();
     void createUniformBuffers();
     void setupDescriptors();
     void createPipelines();
@@ -182,6 +183,10 @@ public:
     void createLightPipelineLayout();
     void createLightPipeline();
 
+    void generateIrradianceCubeMap();
+    void generatePrefilteredCubeMap();
+    void generateBRDFLUT();
+
     virtual void render() override;
     virtual void prepare() override;
     virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay) override;
@@ -194,6 +199,9 @@ public:
     void cmdDrawSkybox(VkCommandBuffer cmd);
 
 private:
+    const std::string filterCubeVertexShader = "lab2/fliterCube.vert.spv";
+    const std::string irradianceFragmentShader = "lab2/irradianceMap.frag.spv";
+
     const std::string pbrSceneVertexShader = "lab2/pbrScene.vert.spv";
     const std::string pbrSceneFragmentShader = "lab2/pbrScene.frag.spv";
 

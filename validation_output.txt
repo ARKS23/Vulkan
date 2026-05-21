@@ -48,3 +48,9 @@ The Vulkan spec states: If image has a depth/stencil format with both depth and 
 Sun May 17 13:40:32 2026: ERROR: [-1213507110][VUID-VkImageMemoryBarrier2-image-03320] : (Warning - This VUID has now been reported 10 times, which is the duplicate_message_limit value, this will be the last time reporting it).
 vkCmdPipelineBarrier2(): pDependencyInfo->pImageMemoryBarriers[0].image (VkImage 0x130000000013) has depth/stencil format VK_FORMAT_D32_SFLOAT_S8_UINT, but its aspectMask is VK_IMAGE_ASPECT_DEPTH_BIT.
 The Vulkan spec states: If image has a depth/stencil format with both depth and stencil and the separateDepthStencilLayouts feature is not enabled, then the aspectMask member of subresourceRange must include both VK_IMAGE_ASPECT_DEPTH_BIT and VK_IMAGE_ASPECT_STENCIL_BIT (https://docs.vulkan.org/spec/latest/chapters/synchronization.html#VUID-VkImageMemoryBarrier2-image-03320)
+Wed May 20 17:35:07 2026: Sample: Lab2 : PBR
+Wed May 20 17:35:08 2026: ERROR: [1089172975][VUID-VkWriteDescriptorSet-descriptorType-02997] : vkUpdateDescriptorSets(): pDescriptorWrites[2].pImageInfo[0].imageView is VK_NULL_HANDLE, and descriptorType is VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER.
+The Vulkan spec states: If descriptorType is VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, or VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, and the nullDescriptor feature is not enabled, the imageView member of each element of pImageInfo must not be VK_NULL_HANDLE (https://docs.vulkan.org/spec/latest/chapters/descriptorsets.html#VUID-VkWriteDescriptorSet-descriptorType-02997)
+Wed May 20 17:43:12 2026: Sample: Lab2 : PBR
+Wed May 20 17:47:23 2026: Sample: Lab2 : PBR
+Wed May 20 17:48:01 2026: Sample: Lab2 : PBR

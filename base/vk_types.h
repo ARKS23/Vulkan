@@ -55,3 +55,17 @@ struct AllocatedTexture {
     VkSampler sampler{ VK_NULL_HANDLE };
     VkDescriptorImageInfo descriptor{};
 };
+
+struct AllocatedCubeTexture {
+    VkImage image{ VK_NULL_HANDLE };
+    VkImageView view{ VK_NULL_HANDLE };
+    VkSampler sampler{ VK_NULL_HANDLE };
+    VmaAllocation allocation{ VK_NULL_HANDLE };
+    VmaAllocationInfo allocationInfo{};
+    VkDescriptorImageInfo descriptor{};
+    VkFormat format{ VK_FORMAT_UNDEFINED };
+    VkImageLayout layout{ VK_IMAGE_LAYOUT_UNDEFINED };
+    uint32_t width{ 0 };
+    uint32_t height{ 0 };
+    uint32_t mipLevels{ 1 };
+};

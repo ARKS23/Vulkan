@@ -14,11 +14,34 @@ namespace vkutil {
         VkImageAspectFlags aspectFlags
     );
 
+    AllocatedCubeTexture createAllocatedCubeTexture(
+        VkDevice device,
+        VmaAllocator allocator,
+        uint32_t dim,
+        uint32_t mipLevels,
+        VkFormat format,
+        VkImageUsageFlags usage,
+        VkImageLayout descriptorLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    );
+
     // 按依赖顺序销毁 image view，再销毁 VMA image allocation。
     void destroyAllocatedImage(
         VkDevice device,
         VmaAllocator allocator,
         AllocatedImage& allocatedImage
+    );
+
+    void destroyAllocatedCubeTexture(
+        VkDevice device,
+        VmaAllocator allocator,
+        AllocatedCubeTexture& texture
+    );
+
+    VkImageSubresourceRange cubeSubresourceRange(
+        uint32_t mipLevels,
+        uint32_t baseMipLevel = 0,
+        uint32_t baseArrayLayer = 0,
+        uint32_t layerCount = 6
     );
 
     // 向已有 command buffer 录入一次 image layout transition。
@@ -29,6 +52,15 @@ namespace vkutil {
         VkImageLayout oldLayout,
         VkImageLayout newLayout,
         VkImageAspectFlags aspectMask
+    );
+
+    // Range-based overload for cubemaps, texture arrays and mipmapped images.
+    void cmdTransitionImageLayout(
+        VkCommandBuffer cmd,
+        VkImage image,
+        VkImageLayout oldLayout,
+        VkImageLayout newLayout,
+        VkImageSubresourceRange subresourceRange
     );
 
     // 录入 buffer -> image 拷贝命令，面向单层、单 mip 的 2D color image。
