@@ -103,12 +103,14 @@ void VulkanExample::loadAssets() {
 
     // IBL 天空盒纹理和顶点
     textures.environmentCubeMap.loadFromFile(getAssetPath() + hdrFilePath, VK_FORMAT_R16G16B16A16_SFLOAT, vulkanDevice, queue);
-    skyboxCube.loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, vkglTF::FileLoadingFlags::PreTransformVertices);
+    skyboxCube.loadFromFile(getAssetPath() + "models/cube.gltf", vulkanDevice, queue, vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY);
 }
 
 void VulkanExample::destroyAssets() {
     textures.environmentCubeMap.destroy();
     vkutil::destroyAllocatedCubeTexture(device, allocator, textures.irradianceCubeMap);
+    vkutil::destroyAllocatedCubeTexture(device, allocator, textures.prefilteredCubeMap);
+    vkutil::destroyTexture(device, allocator, textures.brdfLUT);
 }
 
 void VulkanExample::createUniformBuffers() {
@@ -167,19 +169,13 @@ void VulkanExample::createDescriptorsPool() {
 }
 
 void VulkanExample::setupDescriptors() {
-    // // Pool
-    // std::vector<VkDescriptorPoolSize> poolSizes = {
-    //     vkutil::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, maxConcurrentFrames * 10),
-    //     vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxConcurrentFrames * 10)
-    // };
-    // VkDescriptorPoolCreateInfo poolCI = vkutil::descriptorPoolCreateInfo(poolSizes, maxConcurrentFrames * 10);
-    // VK_CHECK_RESULT(vkCreateDescriptorPool(device, &poolCI, nullptr, &descriptorPool));
-
     // -------------------------------------------------------- Layout --------------------------------------------------------
     std::vector<VkDescriptorSetLayoutBinding> bindingLayout = { // 场景管线layout
         vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
         vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT , 1),
-        vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT , 2)
+        vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT , 2), // irradiance map
+        vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT , 3), // prefilter map
+        vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT , 4)  // brdf LUT
     };
     VkDescriptorSetLayoutCreateInfo layoutCI = vkutil::descriptorSetLayoutCreateInfo(bindingLayout);
     VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &layoutCI, nullptr, &descriptorSetLayouts.sceneDescriptorSetLayout));
@@ -208,10 +204,14 @@ void VulkanExample::setupDescriptors() {
         VkDescriptorBufferInfo matricesBufferInfo = vkutil::descriptorBufferInfo(uniformBuffersScene[i].matricesBuffer.handle, sizeof(UniformDataMatrices), 0);
         VkDescriptorBufferInfo lightBufferInfo = vkutil::descriptorBufferInfo(uniformBuffersScene[i].lightBuffer.handle, sizeof(UniformDataLights), 0);
         VkDescriptorImageInfo irradianceImageInfo = vkutil::descriptorImageInfo(textures.irradianceCubeMap.sampler, textures.irradianceCubeMap.view, textures.irradianceCubeMap.layout);
+        VkDescriptorImageInfo prefilterImageInfo = vkutil::descriptorImageInfo(textures.prefilteredCubeMap.sampler, textures.prefilteredCubeMap.view, textures.prefilteredCubeMap.layout);
+        VkDescriptorImageInfo brdfLUTImageInfo = vkutil::descriptorImageInfo(textures.brdfLUT.descriptor.sampler, textures.brdfLUT.descriptor.imageView, textures.brdfLUT.descriptor.imageLayout);
         std::vector<VkWriteDescriptorSet> writes = {
             vkutil::writeUniformBuffer(descriptorSets[i].sceneDescriptor, 0, &matricesBufferInfo),
             vkutil::writeUniformBuffer(descriptorSets[i].sceneDescriptor, 1, &lightBufferInfo),
-            vkutil::writeCombinedImageSampler(descriptorSets[i].sceneDescriptor, 2, &irradianceImageInfo)
+            vkutil::writeCombinedImageSampler(descriptorSets[i].sceneDescriptor, 2, &irradianceImageInfo),
+            vkutil::writeCombinedImageSampler(descriptorSets[i].sceneDescriptor, 3, &prefilterImageInfo),
+            vkutil::writeCombinedImageSampler(descriptorSets[i].sceneDescriptor, 4, &brdfLUTImageInfo)
         };
         vkutil::updateDescriptorSet(device, writes);
 
@@ -445,10 +445,11 @@ void VulkanExample::createLightPipeline() {
 
 void VulkanExample::updateUniformBuffers() {
     // 矩阵数据
-    UBOMatrix.camPos = camera.position;
+    // UBOMatrix.camPos = camera.position;
     UBOMatrix.model = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f + (objectIndex == 1 ? 45.0f : 0.0f)), glm::vec3(0.0f, 1.0f, 0.0f));
     UBOMatrix.projection = camera.matrices.perspective;
     UBOMatrix.view = camera.matrices.view;
+    UBOMatrix.camPos = glm::vec3(glm::inverse(camera.matrices.view)[3]);
     memcpy(uniformBuffersScene[currentBuffer].matricesBuffer.allocationInfo.pMappedData, &UBOMatrix, sizeof(UBOMatrix));
     vmaFlushAllocation(allocator, uniformBuffersScene[currentBuffer].matricesBuffer.allocation, 0, sizeof(UBOMatrix));
 
@@ -731,11 +732,11 @@ void VulkanExample::generateIrradianceCubeMap() {
     };
 
     VkExtent2D extent = VkExtent2D{dim, dim};
-    VkRenderingAttachmentInfo colorAttachment = vkutil::renderingAttachmentInfo(
-        textures.irradianceCubeMap.view,
-        VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-        VkClearValue{{ 0.00f, 0.00f, 0.00f, 1.0f }}
-    );
+    // VkRenderingAttachmentInfo colorAttachment = vkutil::renderingAttachmentInfo(
+    //     textures.irradianceCubeMap.view,
+    //     VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+    //     VkClearValue{{ 0.00f, 0.00f, 0.00f, 1.0f }}
+    // );
 
     VkImageSubresourceRange cubeRange = vkutil::cubeSubresourceRange(numMips);
     VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
@@ -825,9 +826,304 @@ void VulkanExample::generateIrradianceCubeMap() {
 }
 
 void VulkanExample::generatePrefilteredCubeMap() {
-    
+    // 资源初始化
+    const VkFormat format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    const int32_t dim = 1024;
+    const uint32_t numMips = static_cast<uint32_t>(floor(log2(dim))) + 1;
+    UBOMatrix.mipNums = numMips;
+
+    textures.prefilteredCubeMap = vkutil::createAllocatedCubeTexture(device, allocator, dim, numMips, format, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    AllocatedImage offscreen = vkutil::createAllocatedImage( // 中转image
+        device,
+        allocator,
+        {dim, dim, 1},
+        format,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT
+    );
+
+    // pushconstants
+    struct PrefilterPushconstant {
+        glm::mat4 mvp;
+        float roughness;
+        uint32_t sampleCounts;
+    } prefilterPushconstant;
+
+    // 描述符
+    VkDescriptorSetLayout descriptorsetlayout;
+    std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+        vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 0)
+    };
+    VkDescriptorSetLayoutCreateInfo descriptorsetlayoutCI = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
+    VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorsetlayoutCI, nullptr, &descriptorsetlayout));
+
+    VkDescriptorSet descriptorset;
+    VkDescriptorSetAllocateInfo allocInfo =	vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorsetlayout, 1);
+    VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorset));
+    VkWriteDescriptorSet writeDescriptorSet = vks::initializers::writeDescriptorSet(descriptorset, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0, &textures.environmentCubeMap.descriptor);
+    vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
+
+    // 管线
+    VkPipelineLayout pipelinelayout;
+    std::vector<VkPushConstantRange> pushConstantRanges = {
+			vks::initializers::pushConstantRange(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(PrefilterPushconstant), 0),
+	};
+    VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(&descriptorsetlayout, 1);
+    pipelineLayoutCI.pushConstantRangeCount = 1;
+	pipelineLayoutCI.pPushConstantRanges = pushConstantRanges.data();
+    VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelinelayout));
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
+    VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
+    VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
+    VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_FALSE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL);
+    VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1);
+    VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
+    std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
+    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages{};
+
+    VkPipelineRenderingCreateInfo renderingCreateInfo = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
+    renderingCreateInfo.colorAttachmentCount = 1;
+    renderingCreateInfo.pColorAttachmentFormats = &format;
+    renderingCreateInfo.depthAttachmentFormat = VK_FORMAT_UNDEFINED;
+    renderingCreateInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+
+    VkGraphicsPipelineCreateInfo pipelineCI = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+    pipelineCI.pNext = &renderingCreateInfo;
+    pipelineCI.layout = pipelinelayout;
+    pipelineCI.pInputAssemblyState = &inputAssemblyState;
+    pipelineCI.pRasterizationState = &rasterizationState;
+    pipelineCI.pColorBlendState = &colorBlendState;
+    pipelineCI.pMultisampleState = &multisampleState;
+    pipelineCI.pViewportState = &viewportState;
+    pipelineCI.pDepthStencilState = &depthStencilState;
+    pipelineCI.pDynamicState = &dynamicState;
+    pipelineCI.stageCount = 2;
+    pipelineCI.pStages = shaderStages.data();
+    pipelineCI.renderPass = VK_NULL_HANDLE;
+    pipelineCI.pVertexInputState = vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV });
+
+    shaderStages[0] = loadShader(getShadersPath() + filterCubeVertexShader, VK_SHADER_STAGE_VERTEX_BIT);
+    shaderStages[1] = loadShader(getShadersPath() + prefilterFragmentShader, VK_SHADER_STAGE_FRAGMENT_BIT);
+
+    VkPipeline pipeline;
+    VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipeline));
+
+    // 绘制
+    glm::vec3 origin = glm::vec3(0.0f);
+    std::vector<glm::mat4> viewMatrices = {
+        // +X
+        glm::lookAt(origin, origin + glm::vec3( 1.0f,  0.0f,  0.0f), glm::vec3(0.0f, -1.0f,  0.0f)),
+
+        // -X
+        glm::lookAt(origin, origin + glm::vec3(-1.0f,  0.0f,  0.0f), glm::vec3(0.0f, -1.0f,  0.0f)),
+
+        // +Y
+        glm::lookAt(origin, origin + glm::vec3( 0.0f,  1.0f,  0.0f), glm::vec3(0.0f,  0.0f,  1.0f)),
+
+        // -Y
+        glm::lookAt(origin, origin + glm::vec3( 0.0f, -1.0f,  0.0f), glm::vec3(0.0f,  0.0f, -1.0f)),
+
+        // +Z
+        glm::lookAt(origin, origin + glm::vec3( 0.0f,  0.0f,  1.0f), glm::vec3(0.0f, -1.0f,  0.0f)),
+
+        // -Z
+        glm::lookAt(origin, origin + glm::vec3( 0.0f,  0.0f, -1.0f), glm::vec3(0.0f, -1.0f,  0.0f)),
+    };
+
+    VkImageSubresourceRange cubeRange = vkutil::cubeSubresourceRange(numMips);
+    VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+    {
+        vkutil::cmdTransitionImageLayout(
+            cmdBuf, textures.prefilteredCubeMap.image,
+            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            cubeRange
+        );
+        vkutil::cmdTransitionImageLayout(
+            cmdBuf,
+            offscreen.image,
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+            VK_IMAGE_ASPECT_COLOR_BIT
+        );
+
+        for (uint32_t mip = 0; mip < numMips; ++mip) {
+            const uint32_t mipDim = static_cast<uint32_t>(dim * std::pow(0.5f, mip));
+            prefilterPushconstant.roughness = (float)mip / (float)(numMips - 1);
+            prefilterPushconstant.sampleCounts = 1024;
+            for (uint32_t face = 0; face < 6; ++face) {
+                // 绘制到offscreen
+                VkExtent2D renderExtent {mipDim, mipDim};
+                VkRenderingAttachmentInfo colorAttachment = vkutil::renderingAttachmentInfo(offscreen.imageView, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VkClearValue{0.0, 0.0, 0.0, 1.0});
+                vkutil::cmdBeginColorOnlyRendering(cmdBuf, renderExtent, colorAttachment);
+                {
+                    vkutil::cmdSetViewportAndScissor(cmdBuf, mipDim, mipDim);
+                    prefilterPushconstant.mvp = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 512.0f) * viewMatrices[face];
+                    vkCmdPushConstants(cmdBuf, pipelinelayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(prefilterPushconstant), &prefilterPushconstant);
+                    vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+                    vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelinelayout, 0, 1, &descriptorset, 0, nullptr);
+                    skyboxCube.draw(cmdBuf);
+                }
+                vkutil::cmdEndRendering(cmdBuf);
+
+                // 从offscreen复制到cube map的面上
+                vkutil::cmdTransitionImageLayout(   // 先转成传输源格式
+                    cmdBuf,
+                    offscreen.image,
+                    VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    VK_IMAGE_ASPECT_COLOR_BIT
+                );
+
+                VkImageCopy copyRegion{};
+                copyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                copyRegion.srcSubresource.mipLevel = 0;
+                copyRegion.srcSubresource.baseArrayLayer = 0;   // layer的起始地址
+                copyRegion.srcSubresource.layerCount = 1;       // 拷贝layer的数量
+
+                copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                copyRegion.dstSubresource.mipLevel = mip;       // mip层级
+                copyRegion.dstSubresource.baseArrayLayer = face;
+                copyRegion.dstSubresource.layerCount = 1;
+
+                copyRegion.extent = {mipDim, mipDim, 1};
+
+                vkCmdCopyImage(cmdBuf,
+                    offscreen.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    textures.prefilteredCubeMap.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    1, &copyRegion
+                );
+
+                vkutil::cmdTransitionImageLayout(   // 传输完转回颜色附件
+                    cmdBuf,
+                    offscreen.image,
+                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                    VK_IMAGE_ASPECT_COLOR_BIT
+                );
+            }
+        }
+
+        vkutil::cmdTransitionImageLayout(
+            cmdBuf, textures.prefilteredCubeMap.image, 
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 
+            cubeRange
+        );
+        textures.prefilteredCubeMap.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        textures.prefilteredCubeMap.descriptor.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    }
+    vulkanDevice->flushCommandBuffer(cmdBuf, queue);
+
+    // 清理资源
+    vkutil::destroyAllocatedImage(device, allocator, offscreen);
+    vkDestroyPipeline(device, pipeline, nullptr);
+    vkDestroyPipelineLayout(device, pipelinelayout, nullptr);
+    vkDestroyDescriptorSetLayout(device, descriptorsetlayout, nullptr);
 }
 
 void VulkanExample::generateBRDFLUT() {
+    // 初始化资源
+    const VkFormat format = VK_FORMAT_R16G16_SFLOAT;
+    const int32_t dim = 512;
 
+    textures.brdfLUT.image = vkutil::createAllocatedImage(device, allocator,
+        VkExtent3D{dim, dim, 1}, format, 
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 
+        VK_IMAGE_ASPECT_COLOR_BIT
+    );
+
+    VkSamplerCreateInfo samplerCI = vks::initializers::samplerCreateInfo();
+    samplerCI.magFilter = VK_FILTER_LINEAR;
+    samplerCI.minFilter = VK_FILTER_LINEAR;
+    samplerCI.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerCI.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCI.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCI.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCI.minLod = 0.0f;
+    samplerCI.maxLod = 1.0f;
+    samplerCI.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+    VK_CHECK_RESULT(vkCreateSampler(device, &samplerCI, nullptr, &textures.brdfLUT.sampler));
+
+    textures.brdfLUT.descriptor.imageView = textures.brdfLUT.image.imageView;
+    textures.brdfLUT.descriptor.sampler = textures.brdfLUT.sampler;
+    textures.brdfLUT.descriptor.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    // 描述符
+    VkDescriptorSetLayout descriptorsetlayout;
+    std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {};
+    VkDescriptorSetLayoutCreateInfo descriptorsetlayoutCI = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings);
+    VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorsetlayoutCI, nullptr, &descriptorsetlayout));
+
+    VkDescriptorSet descriptorset;
+    VkDescriptorSetAllocateInfo allocInfo = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &descriptorsetlayout, 1);
+    VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorset));
+
+    // 管线
+    VkPipelineLayout pipelinelayout;
+    VkPipelineLayoutCreateInfo pipelineLayoutCI = vks::initializers::pipelineLayoutCreateInfo(&descriptorsetlayout, 1);
+    VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelinelayout));
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
+    VkPipelineRasterizationStateCreateInfo rasterizationState = vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    VkPipelineColorBlendAttachmentState blendAttachmentState = vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE);
+    VkPipelineColorBlendStateCreateInfo colorBlendState = vks::initializers::pipelineColorBlendStateCreateInfo(1, &blendAttachmentState);
+    VkPipelineDepthStencilStateCreateInfo depthStencilState = vks::initializers::pipelineDepthStencilStateCreateInfo(VK_FALSE, VK_FALSE, VK_COMPARE_OP_LESS_OR_EQUAL);
+    VkPipelineViewportStateCreateInfo viewportState = vks::initializers::pipelineViewportStateCreateInfo(1, 1);
+    VkPipelineMultisampleStateCreateInfo multisampleState = vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT);
+    std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables);
+    VkPipelineVertexInputStateCreateInfo emptyInputState = vks::initializers::pipelineVertexInputStateCreateInfo();
+    std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
+
+    shaderStages[0] = loadShader(getShadersPath() + brdfLUTVertexShader, VK_SHADER_STAGE_VERTEX_BIT);
+    shaderStages[1] = loadShader(getShadersPath() + brdfLUTFragmentShader, VK_SHADER_STAGE_FRAGMENT_BIT);
+
+    VkPipelineRenderingCreateInfo renderingCreateInfo = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
+    renderingCreateInfo.colorAttachmentCount = 1;
+    renderingCreateInfo.pColorAttachmentFormats = &format;
+    renderingCreateInfo.depthAttachmentFormat = VK_FORMAT_UNDEFINED;
+    renderingCreateInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+
+    VkGraphicsPipelineCreateInfo pipelineCI = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+    pipelineCI.pNext = &renderingCreateInfo;
+    pipelineCI.layout = pipelinelayout;
+    pipelineCI.pInputAssemblyState = &inputAssemblyState;
+    pipelineCI.pRasterizationState = &rasterizationState;
+    pipelineCI.pColorBlendState = &colorBlendState;
+    pipelineCI.pMultisampleState = &multisampleState;
+    pipelineCI.pViewportState = &viewportState;
+    pipelineCI.pDepthStencilState = &depthStencilState;
+    pipelineCI.pDynamicState = &dynamicState;
+    pipelineCI.stageCount = 2;
+    pipelineCI.pStages = shaderStages.data();
+    pipelineCI.renderPass = VK_NULL_HANDLE;
+    pipelineCI.pVertexInputState = &emptyInputState;    // 直接画四边形，不用顶点输入
+
+    VkPipeline pipeline;
+    VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipeline));
+
+    // 绘制
+    VkCommandBuffer cmdBuf = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+    {
+        vkutil::cmdTransitionImageLayout(cmdBuf, textures.brdfLUT.image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+
+        VkRenderingAttachmentInfo colorAttachment = vkutil::renderingAttachmentInfo(textures.brdfLUT.image.imageView, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VkClearValue{0.0, 0.0, 0.0, 1.0});
+        vkutil::cmdBeginColorOnlyRendering(cmdBuf, VkExtent2D{dim, dim}, colorAttachment);
+        {
+            vkutil::cmdSetViewportAndScissor(cmdBuf, dim, dim);
+            vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+            vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelinelayout, 0, 1, &descriptorset, 0, nullptr);
+            vkCmdDraw(cmdBuf, 3, 1, 0, 0);
+        }
+        vkutil::cmdEndRendering(cmdBuf);
+        vkutil::cmdTransitionImageLayout(cmdBuf, textures.brdfLUT.image.image, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+    }
+    vulkanDevice->flushCommandBuffer(cmdBuf, queue);
+
+    // 资源清理
+    vkDestroyPipeline(device, pipeline, nullptr);
+    vkDestroyPipelineLayout(device, pipelinelayout, nullptr);
+    vkDestroyDescriptorSetLayout(device, descriptorsetlayout, nullptr);
 }

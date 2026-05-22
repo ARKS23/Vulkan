@@ -61,6 +61,8 @@ public:
         glm::mat4 model;
         glm::mat4 view;
         glm::vec3 camPos;
+
+        uint32_t mipNums = 5;
     };
 
     struct UniformDataLights {
@@ -201,6 +203,10 @@ public:
 private:
     const std::string filterCubeVertexShader = "lab2/fliterCube.vert.spv";
     const std::string irradianceFragmentShader = "lab2/irradianceMap.frag.spv";
+    const std::string prefilterFragmentShader = "lab2/prefilterMap.frag.spv";
+
+    const std::string brdfLUTVertexShader = "lab2/BRDFLUT.vert.spv";
+    const std::string brdfLUTFragmentShader = "lab2/BRDFLUT.frag.spv";
 
     const std::string pbrSceneVertexShader = "lab2/pbrScene.vert.spv";
     const std::string pbrSceneFragmentShader = "lab2/pbrScene.frag.spv";

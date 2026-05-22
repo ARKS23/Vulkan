@@ -12,6 +12,7 @@ struct UBOMatrix {
     float4x4 model;
     float4x4 view;
     float3 camPos;
+    uint mipNums;
 };
 ConstantBuffer<UBOMatrix> matrices : register(b0, space0);
 
@@ -24,6 +25,12 @@ ConstantBuffer<UBOLight> light : register(b1, space0);
 
 TextureCube irradianceMap : register(t2);
 SamplerState irradianceMapSampler : register(s2);
+
+TextureCube prefilterMap : register(t3);
+SamplerState prefilterMapSampler : register(s3);
+
+Texture2D brdfLUT : register(t4);
+SamplerState brdfLUTSampler : register(s4);
 
 struct Pushconstants {
     [[vk::offset(12)]] float roughness;
@@ -121,12 +128,28 @@ float3 direcBRDF(float3 N, float3 V, float3 L, float3 H, float roughness, float 
 }
 
 float3 computeDiffuseIBL(float3 N, float3 V, float3 albedo, float metallic, float roughness, float3 F0) {
-    // 环境光照部分，使用漫反射IBL
+    // 环境光照漫反射部分：Irradiance map
     float NdotV = max(dot(N, V), 0.0);
     float3 F = F_SchlickRoughness(NdotV, F0, roughness);
     float3 kd = (1.0 - F) * (1.0 - metallic);
     float3 irradiance = irradianceMap.Sample(irradianceMapSampler, N).rgb;
     return kd * albedo * irradiance;
+}
+
+float3 computeSpecularIBL(float3 N, float3 V, float3 F0, float roughness) {
+    // 环境光照高光部分，prefilter + LUT
+    float3 color = float3(0.0, 0.0, 0.0);
+    float3 R = reflect(-V, N);
+    float NdotV = max(dot(N, V), 0.0);
+    float3 F = F_SchlickRoughness(NdotV, F0, roughness);
+
+    // prefilter env map采样，lod根据roughness计算
+    float lod = roughness * float(matrices.mipNums - 1);
+    float3 prefilterColor = prefilterMap.SampleLevel(prefilterMapSampler, R, lod).rgb;
+    // 查表LUT
+    float2 brdf = brdfLUT.Sample(brdfLUTSampler, float2(NdotV, roughness)).rg;
+    color = prefilterColor * (F * brdf.x + brdf.y);
+    return color;
 }
 
 FSOutput main(FSInput input) {
@@ -141,7 +164,7 @@ FSOutput main(FSInput input) {
 
     // 环境光
     float3 diffuseIBL = computeDiffuseIBL(N, V, albedo, metallic, roughness, F0);
-    float3 specularIBL = float3(0.0, 0.0, 0.0); // 后续补充
+    float3 specularIBL = computeSpecularIBL(N, V, F0, roughness);
     float3 ambient = diffuseIBL + specularIBL;
 
     // 计算直接光照

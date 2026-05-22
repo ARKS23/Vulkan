@@ -54,13 +54,13 @@ float3 importanceSampleGGX(float2 Xi, float roughness, float3 N) {
     float3 tangentY = cross(N, tangentX);
     
     // 转换到世界空间
-    return tangentX * H.x + tangentY * H.y + N * H.z;
+    return normalize(tangentX * H.x + tangentY * H.y + N * H.z);
 }
 
 FSOutput main(FSInput input) {
     FSOutput output;
 
-    float3 N = input.UVW;
+    float3 N = normalize(input.UVW);
     float3 R = N;
     float3 V = R;
 
