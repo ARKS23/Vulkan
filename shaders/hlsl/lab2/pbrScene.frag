@@ -86,6 +86,7 @@ float3 F_SchlickRoughness(float cosTheta, float3 F0, float roughness) {
 
 // --------------------------------------------- BRDF: Cook-Torrance BRDF ---------------------------------------------
 float3 direcBRDF(float3 N, float3 V, float3 L, float3 H, float roughness, float metallic, float3 albedo, float3 F0) {
+    // 直接光照计算函数
     N = normalize(N);
     V = normalize(V);
     L = normalize(L);
@@ -120,6 +121,7 @@ float3 direcBRDF(float3 N, float3 V, float3 L, float3 H, float roughness, float 
 }
 
 float3 computeDiffuseIBL(float3 N, float3 V, float3 albedo, float metallic, float roughness, float3 F0) {
+    // 环境光照部分，使用漫反射IBL
     float NdotV = max(dot(N, V), 0.0);
     float3 F = F_SchlickRoughness(NdotV, F0, roughness);
     float3 kd = (1.0 - F) * (1.0 - metallic);

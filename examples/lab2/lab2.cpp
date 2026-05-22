@@ -825,7 +825,7 @@ void VulkanExample::generateIrradianceCubeMap() {
 }
 
 void VulkanExample::generatePrefilteredCubeMap() {
-
+    
 }
 
 void VulkanExample::generateBRDFLUT() {
