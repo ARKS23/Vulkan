@@ -50,12 +50,6 @@ public:
 
 class VulkanExample : public VulkanExampleBase {
 public:
-    // struct PushConstantParamsData {
-    //     float roughness;
-    //     float metallic;
-    //     glm::vec3 baseColor;
-    // };
-
     struct UniformDataMatrices {
         glm::mat4 projection;
         glm::mat4 model;
@@ -79,6 +73,7 @@ public:
 
     struct UniformBuffers {
         AllocatedBuffer matricesBuffer;
+        AllocatedBuffer pbrTextureMatricesBuffer;
         AllocatedBuffer lightBuffer;
         AllocatedBuffer lightSourceMatricesBuffer;
         AllocatedBuffer skyBoxMatricesBuffer;
@@ -99,18 +94,21 @@ public:
 
     struct Piplelines {
         VkPipeline scenePipeline = {VK_NULL_HANDLE};
+        VkPipeline pbrTexturePipeline = {VK_NULL_HANDLE};
         VkPipeline skyboxPipeline = {VK_NULL_HANDLE};
         VkPipeline lightPipeline = {VK_NULL_HANDLE};
     };
 
     struct PipelinesLayout {
         VkPipelineLayout scenePipelineLayout = {VK_NULL_HANDLE};
+        VkPipelineLayout pbrTexturePipelineLayout = {VK_NULL_HANDLE};
         VkPipelineLayout skyboxPipelineLayout = {VK_NULL_HANDLE};
         VkPipelineLayout lightPipelineLayout = {VK_NULL_HANDLE};
     };
 
     struct DescriptorSets {
         VkDescriptorSet sceneDescriptor{ VK_NULL_HANDLE };
+        VkDescriptorSet pbrTextureDescriptor{ VK_NULL_HANDLE };
         VkDescriptorSet skyboxDescriptor{ VK_NULL_HANDLE };
         VkDescriptorSet lightDescriptor{ VK_NULL_HANDLE };
     };
@@ -135,6 +133,7 @@ public:
 
     // UBO
     UniformDataMatrices UBOMatrix;
+    UniformDataMatrices UBOPBRTextureMatrix;
     UniformDataLights UBOLights;
     UniformDataMatrices UBOLightSourceMatrix;
     UniformDataSkyBox UBOSkyBox;
@@ -151,6 +150,11 @@ public:
     std::vector<Material> materials;
     std::vector<std::string> materialNames;
     int32_t materialIndex = 0;
+
+    vkglTF::Model pbrObject;
+    glm::vec3 pbrObjectPos = glm::vec3(-10.0f, -5.5f, -7.0f);
+    float rotationAngle = 0.0f;
+    float scaleRatio = 1.0f;
 
     // 天空盒顶点
     vkglTF::Model skyboxCube;
@@ -180,6 +184,8 @@ public:
 
     void createScenePipelineLayout();
     void createScenePipeline();
+    void createPBRTexturePipelineLayout();
+    void createPBRTexturePipeline();
     void createSkyboxPipelineLayout();
     void createSkyboxPipeline();
     void createLightPipelineLayout();
@@ -197,6 +203,7 @@ public:
     void buildCommandBuffer();
 
     void cmdDrawSecne(VkCommandBuffer cmd);
+    void cmdDrawPBRTexture(VkCommandBuffer cmd);
     void cmdDrawLight(VkCommandBuffer cmd);
     void cmdDrawSkybox(VkCommandBuffer cmd);
 
@@ -211,13 +218,17 @@ private:
     const std::string pbrSceneVertexShader = "lab2/pbrScene.vert.spv";
     const std::string pbrSceneFragmentShader = "lab2/pbrScene.frag.spv";
 
+    const std::string pbrModelPath = "models/DamagedHelmet/DamagedHelmet.gltf";
+    const std::string pbrTextureVertexShader = "lab2/pbrTexture.vert.spv";
+    const std::string pbrTextureFragmentShader = "lab2/pbrTexture.frag.spv";
+
     const std::string lightVertexShader = "lab2/light.vert.spv";
     const std::string lightFragmentShader = "lab2/light.frag.spv";
 
     const std::string skyboxVertexShader = "lab2/skybox.vert.spv";
     const std::string skyboxFragmentShader = "lab2/skybox.frag.spv";
 
-    const std::string hdrFilePath = "textures/hdr/pisa_cube.ktx";
+    const std::string hdrFilePath = "textures/hdr/church.ktx";
 };
 
 VULKAN_EXAMPLE_MAIN();

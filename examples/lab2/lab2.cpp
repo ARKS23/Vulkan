@@ -45,6 +45,14 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay *overlay) {
         overlay->comboBox("Model", &objectIndex, objectNames);
         overlay->comboBox("Material", &materialIndex, materialNames);
     }
+
+    if (overlay->header("SceneSettings")) {
+        overlay->sliderFloat("Object X", &pbrObjectPos.x, -20.0f, 20.0f);
+        overlay->sliderFloat("Object Y", &pbrObjectPos.y, -20.0f, 20.0f);
+        overlay->sliderFloat("Object Z", &pbrObjectPos.z, -20.0f, 20.0f);
+        overlay->sliderFloat("Rotation", &rotationAngle, 0.0f, 360.0f);
+        overlay->sliderFloat("Scale", &scaleRatio, 0.5f, 10.0f);
+    }
 }
 
 VulkanExample::~VulkanExample() {
@@ -91,6 +99,15 @@ void VulkanExample::destroyVmaAllocator() {
 }
 
 void VulkanExample::loadAssets() {
+    // PBR Texture物体模型
+    vkglTF::descriptorBindingFlags = 
+        vkglTF::DescriptorBindingFlags::ImageBaseColor | 
+        vkglTF::ImageMetallicRoughness | 
+        vkglTF::ImageNormalMap | 
+        vkglTF::ImageOcclusionMap | 
+        vkglTF::ImageEmissiveMap;
+    pbrObject.loadFromFile(getAssetPath() + pbrModelPath, vulkanDevice, queue, vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY);
+
     objectNames = {"Sphere", "Teapot", "Torusknot", "Venus"};
     std::vector<std::string> filenames = { "sphere.gltf", "teapot.gltf", "torusknot.gltf", "venus.gltf" };
     objects.resize(filenames.size());
@@ -117,6 +134,14 @@ void VulkanExample::destroyAssets() {
 void VulkanExample::createUniformBuffers() {
     for (UniformBuffers& buffer : uniformBuffersScene) {
         buffer.matricesBuffer = vkutil::createAllocatedBuffer(
+            allocator, 
+            sizeof(UniformDataMatrices),
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+            VMA_MEMORY_USAGE_AUTO
+        );
+
+        buffer.pbrTextureMatricesBuffer = vkutil::createAllocatedBuffer(
             allocator, 
             sizeof(UniformDataMatrices),
             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
@@ -153,6 +178,7 @@ void VulkanExample::createUniformBuffers() {
 void VulkanExample::destroyUniformBuffers() {
     for (UniformBuffers& buffer : uniformBuffersScene) {
         vkutil::destroyAllocatedBuffer(allocator, buffer.matricesBuffer);
+        vkutil::destroyAllocatedBuffer(allocator, buffer.pbrTextureMatricesBuffer);
         vkutil::destroyAllocatedBuffer(allocator, buffer.lightBuffer);
         vkutil::destroyAllocatedBuffer(allocator, buffer.lightSourceMatricesBuffer);
         vkutil::destroyAllocatedBuffer(allocator, buffer.skyBoxMatricesBuffer);
@@ -216,9 +242,19 @@ void VulkanExample::setupDescriptors() {
         };
         vkutil::updateDescriptorSet(device, writes);
 
+        VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &descriptorSets[i].pbrTextureDescriptor));
+        VkDescriptorBufferInfo pbrTextureMatricesBufferInfo = vkutil::descriptorBufferInfo(uniformBuffersScene[i].pbrTextureMatricesBuffer.handle, sizeof(UniformDataMatrices), 0);
+        std::vector<VkWriteDescriptorSet> pbrTextureWrites = {
+            vkutil::writeUniformBuffer(descriptorSets[i].pbrTextureDescriptor, 0, &pbrTextureMatricesBufferInfo),
+            vkutil::writeUniformBuffer(descriptorSets[i].pbrTextureDescriptor, 1, &lightBufferInfo),
+            vkutil::writeCombinedImageSampler(descriptorSets[i].pbrTextureDescriptor, 2, &irradianceImageInfo),
+            vkutil::writeCombinedImageSampler(descriptorSets[i].pbrTextureDescriptor, 3, &prefilterImageInfo),
+            vkutil::writeCombinedImageSampler(descriptorSets[i].pbrTextureDescriptor, 4, &brdfLUTImageInfo)
+        };
+        vkutil::updateDescriptorSet(device, pbrTextureWrites);
+
         VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &skyboxAllocInfo, &descriptorSets[i].skyboxDescriptor));
         VkDescriptorBufferInfo skyboxMatricesBufferInfo = vkutil::descriptorBufferInfo(uniformBuffersScene[i].skyBoxMatricesBuffer.handle, sizeof(UniformDataSkyBox), 0);
-        //VkDescriptorImageInfo skyboxImageInfo = vkutil::descriptorImageInfo(textures.irradianceCubeMap.sampler, textures.irradianceCubeMap.view, textures.irradianceCubeMap.descriptor.imageLayout); // irradiance map测试
         VkDescriptorImageInfo skyboxImageInfo = vkutil::descriptorImageInfo(textures.environmentCubeMap.sampler, textures.environmentCubeMap.view, textures.environmentCubeMap.imageLayout);
         std::vector<VkWriteDescriptorSet> skyboxWrites = {
             vkutil::writeUniformBuffer(descriptorSets[i].skyboxDescriptor, 0, &skyboxMatricesBufferInfo),
@@ -260,6 +296,8 @@ void VulkanExample::destroyDescriptors() {
 void VulkanExample::createPipelines() {
     createScenePipelineLayout();
     createScenePipeline();
+    createPBRTexturePipelineLayout();
+    createPBRTexturePipeline();
     createSkyboxPipelineLayout();
     createSkyboxPipeline();
     createLightPipelineLayout();
@@ -274,6 +312,15 @@ void VulkanExample::destroyPipelines() {
     if (pipelinesLayout.scenePipelineLayout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(device, pipelinesLayout.scenePipelineLayout, nullptr);
         pipelinesLayout.scenePipelineLayout = VK_NULL_HANDLE;
+    }
+
+    if (pipelines.pbrTexturePipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(device, pipelines.pbrTexturePipeline, nullptr);
+        pipelines.pbrTexturePipeline = VK_NULL_HANDLE;
+    }
+    if (pipelinesLayout.pbrTexturePipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device, pipelinesLayout.pbrTexturePipelineLayout, nullptr);
+        pipelinesLayout.pbrTexturePipelineLayout = VK_NULL_HANDLE;
     }
 
     if (pipelines.skyboxPipeline != VK_NULL_HANDLE) {
@@ -321,6 +368,29 @@ void VulkanExample::createScenePipeline() {
     pipelines.scenePipeline = builder.build(device, pipelineCache);
 }
 
+void VulkanExample::createPBRTexturePipelineLayout() {
+    std::vector<VkDescriptorSetLayout> setLayouts = {
+        descriptorSetLayouts.sceneDescriptorSetLayout,
+        vkglTF::descriptorSetLayoutImage
+    };
+    pipelinesLayout.pbrTexturePipelineLayout = vkutil::createPipelineLayout(device, setLayouts, {});
+}
+
+void VulkanExample::createPBRTexturePipeline() {
+    vkutil::PipelineBuilder builder;
+    builder.setPipelineLayout(pipelinesLayout.pbrTexturePipelineLayout)
+        .setShaders(
+            loadShader(getShadersPath() + pbrTextureVertexShader, VK_SHADER_STAGE_VERTEX_BIT),
+            loadShader(getShadersPath() + pbrTextureFragmentShader, VK_SHADER_STAGE_FRAGMENT_BIT))
+        .setVertexInput(*vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV, vkglTF::VertexComponent::Tangent}))
+        .setColorAttachmentFormat(swapChain.colorFormat)
+        .setDepthFormat(depthFormat)
+        .enableDepthTest(true, VK_COMPARE_OP_LESS_OR_EQUAL)
+        .setCullMode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE)
+        .disableBlending();
+    pipelines.pbrTexturePipeline = builder.build(device, pipelineCache);
+}
+
 void VulkanExample::createSkyboxPipelineLayout() {
     VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&descriptorSetLayouts.skyboxDescriptorSetLayout, 1);
      VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipelinesLayout.skyboxPipelineLayout));
@@ -330,7 +400,7 @@ void VulkanExample::createSkyboxPipeline() {
     vkutil::PipelineBuilder builder;
     builder.setPipelineLayout(pipelinesLayout.skyboxPipelineLayout)
         .setShaders(
-            loadShader(getShadersPath() + skyboxVertexShader, VK_SHADER_STAGE_VERTEX_BIT),
+            loadShader(getShadersPath() + skyboxVertexShader, VK_SHADER_STAGE_VERTEX_BIT), //TODO
             loadShader(getShadersPath() + skyboxFragmentShader, VK_SHADER_STAGE_FRAGMENT_BIT))
         .setVertexInput(*vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position }))
         .setColorAttachmentFormat(swapChain.colorFormat)
@@ -382,6 +452,16 @@ void VulkanExample::updateUniformBuffers() {
     UBOMatrix.camPos = glm::vec3(glm::inverse(camera.matrices.view)[3]);
     memcpy(uniformBuffersScene[currentBuffer].matricesBuffer.allocationInfo.pMappedData, &UBOMatrix, sizeof(UBOMatrix));
     vmaFlushAllocation(allocator, uniformBuffersScene[currentBuffer].matricesBuffer.allocation, 0, sizeof(UBOMatrix));
+
+    // PBR纹理矩阵数据
+    UBOPBRTextureMatrix.model = glm::translate(glm::mat4(1.0f), pbrObjectPos);
+    UBOPBRTextureMatrix.model = glm::scale(UBOPBRTextureMatrix.model, glm::vec3(scaleRatio));
+    UBOPBRTextureMatrix.model = glm::rotate(UBOPBRTextureMatrix.model, glm::radians(rotationAngle), glm::vec3(0.0f, 1.0f, 0.0f));
+    UBOPBRTextureMatrix.projection = camera.matrices.perspective;
+    UBOPBRTextureMatrix.view = camera.matrices.view;
+    UBOPBRTextureMatrix.camPos = glm::vec3(glm::inverse(camera.matrices.view)[3]);
+    memcpy(uniformBuffersScene[currentBuffer].pbrTextureMatricesBuffer.allocationInfo.pMappedData, &UBOPBRTextureMatrix, sizeof(UBOPBRTextureMatrix));
+    vmaFlushAllocation(allocator, uniformBuffersScene[currentBuffer].pbrTextureMatricesBuffer.allocation, 0, sizeof(UBOPBRTextureMatrix));
 
     // 光源数据
     const float p = 20.0f;
@@ -442,6 +522,7 @@ void VulkanExample::buildCommandBuffer() {
     vkutil::cmdTransitionImageLayout(commandBuffer, depthStencil.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
     vkutil::cmdTransitionImageLayout(commandBuffer, swapChain.images[currentImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
     cmdDrawSecne(commandBuffer);
+    cmdDrawPBRTexture(commandBuffer);
     cmdDrawLight(commandBuffer);
     cmdDrawSkybox(commandBuffer);
     vkutil::cmdTransitionImageLayout(commandBuffer, swapChain.images[currentImageIndex], VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_ASPECT_COLOR_BIT);
@@ -482,6 +563,33 @@ void VulkanExample::cmdDrawSecne(VkCommandBuffer cmd) {
                 objects[objectIndex].draw(cmd);
             }
         }
+    }
+    vkutil::cmdEndRendering(cmd);
+}
+
+void VulkanExample::cmdDrawPBRTexture(VkCommandBuffer cmd) {
+    VkRenderingAttachmentInfo colorAttachment = vkutil::renderingAttachmentInfo(
+        swapChain.imageViews[currentImageIndex],
+        VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        VkClearValue{{ 0.01f, 0.02f, 0.025f, 1.0f }},
+        VK_ATTACHMENT_LOAD_OP_LOAD
+    );
+    
+    VkRenderingAttachmentInfo depthAttachment = vkutil::renderingdepthAttachmentInfo(
+        depthStencil.view,
+        VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+        1.0f,
+        VK_ATTACHMENT_LOAD_OP_LOAD
+    );
+
+    VkExtent2D extent = VkExtent2D{width, height};
+    vkutil::cmdBeginColorDepthRendering(cmd, extent, colorAttachment, depthAttachment);
+    {
+        vkutil::cmdSetViewportAndScissor(cmd, extent.width, extent.height);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.pbrTexturePipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelinesLayout.pbrTexturePipelineLayout, 0, 1, 
+                                &descriptorSets[currentBuffer].pbrTextureDescriptor, 0, nullptr);
+        pbrObject.draw(cmd, vkglTF::RenderFlags::BindImages, pipelinesLayout.pbrTexturePipelineLayout, 1);
     }
     vkutil::cmdEndRendering(cmd);
 }
@@ -853,7 +961,7 @@ void VulkanExample::generatePrefilteredCubeMap() {
         for (uint32_t mip = 0; mip < numMips; ++mip) {
             const uint32_t mipDim = static_cast<uint32_t>(dim * std::pow(0.5f, mip));
             prefilterPushconstant.roughness = (float)mip / (float)(numMips - 1);
-            prefilterPushconstant.sampleCounts = 1024;
+            prefilterPushconstant.sampleCounts = 4096;
             for (uint32_t face = 0; face < 6; ++face) {
                 // 绘制到offscreen
                 VkExtent2D renderExtent {mipDim, mipDim};

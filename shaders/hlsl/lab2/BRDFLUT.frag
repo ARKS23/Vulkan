@@ -78,7 +78,7 @@ float2 integrateBRDF(float NdotV, float roughness) {
     float A = 0.0;
     float B = 0.0;
 
-    const uint sampleCount = 1024;
+    const uint sampleCount = 4096;
     for (uint i = 0; i < sampleCount; ++i) {
         float2 xi = Hammersley(i, sampleCount);
         float3 H = importanceSampleGGX(xi, roughness, N);   // D重要性采样构造半程向量H

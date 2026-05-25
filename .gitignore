@@ -9,6 +9,9 @@
 # pdf 文档
 *.pdf
 
+# 美术资产
+assets/
+
 # Build results
 [Dd]ebug/
 [Dd]ebugPublic/

@@ -24,6 +24,38 @@ VkDescriptorSetLayout vkglTF::descriptorSetLayoutUbo = VK_NULL_HANDLE;
 VkMemoryPropertyFlags vkglTF::memoryPropertyFlags = 0;
 uint32_t vkglTF::descriptorBindingFlags = vkglTF::DescriptorBindingFlags::ImageBaseColor;
 
+namespace {
+	uint32_t getMaterialImageBindingCount(uint32_t descriptorBindingFlags)
+	{
+		uint32_t count = 0;
+		if (descriptorBindingFlags & vkglTF::DescriptorBindingFlags::ImageBaseColor) { count++; }
+		if (descriptorBindingFlags & vkglTF::DescriptorBindingFlags::ImageMetallicRoughness) { count++; }
+		if (descriptorBindingFlags & vkglTF::DescriptorBindingFlags::ImageNormalMap) { count++; }
+		if (descriptorBindingFlags & vkglTF::DescriptorBindingFlags::ImageOcclusionMap) { count++; }
+		if (descriptorBindingFlags & vkglTF::DescriptorBindingFlags::ImageEmissiveMap) { count++; }
+		return count;
+	}
+
+	bool materialHasRequestedImage(const vkglTF::Material& material, uint32_t descriptorBindingFlags)
+	{
+		return ((descriptorBindingFlags & vkglTF::DescriptorBindingFlags::ImageBaseColor) && material.baseColorTexture) ||
+			((descriptorBindingFlags & vkglTF::DescriptorBindingFlags::ImageMetallicRoughness) && material.metallicRoughnessTexture) ||
+			((descriptorBindingFlags & vkglTF::DescriptorBindingFlags::ImageNormalMap) && material.normalTexture) ||
+			((descriptorBindingFlags & vkglTF::DescriptorBindingFlags::ImageOcclusionMap) && material.occlusionTexture) ||
+			((descriptorBindingFlags & vkglTF::DescriptorBindingFlags::ImageEmissiveMap) && material.emissiveTexture);
+	}
+
+	void addMaterialImageLayoutBinding(std::vector<VkDescriptorSetLayoutBinding>& setLayoutBindings)
+	{
+		setLayoutBindings.push_back({
+			.binding = static_cast<uint32_t>(setLayoutBindings.size()),
+			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.descriptorCount = 1,
+			.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT
+		});
+	}
+}
+
 /*
 	We use a custom image loading function with tinyglTF, so we can do custom stuff loading ktx textures
 */
@@ -450,32 +482,42 @@ void vkglTF::Material::createDescriptorSet(VkDescriptorPool descriptorPool, VkDe
 		.pSetLayouts = &descriptorSetLayout,
 	};
 	VK_CHECK_RESULT(vkAllocateDescriptorSets(device->logicalDevice, &descriptorSetAllocInfo, &descriptorSet));
-	std::vector<VkDescriptorImageInfo> imageDescriptors{};
+
 	std::vector<VkWriteDescriptorSet> writeDescriptorSets{};
+	uint32_t binding = 0;
+
+	auto writeImage = [&](vkglTF::Texture* texture) {
+		const uint32_t dstBinding = binding++;
+		if (!texture) {
+			return;
+		}
+		VkWriteDescriptorSet writeDescriptorSet{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = descriptorSet,
+			.dstBinding = dstBinding,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			.pImageInfo = &texture->descriptor
+		};
+		writeDescriptorSets.push_back(writeDescriptorSet);
+	};
+
 	if (descriptorBindingFlags & DescriptorBindingFlags::ImageBaseColor) {
-		imageDescriptors.push_back(baseColorTexture->descriptor);
-		VkWriteDescriptorSet writeDescriptorSet{
-			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-			.dstSet = descriptorSet,
-			.dstBinding = static_cast<uint32_t>(writeDescriptorSets.size()),
-			.descriptorCount = 1,
-			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-			.pImageInfo = &baseColorTexture->descriptor
-		};
-		writeDescriptorSets.push_back(writeDescriptorSet);
+		writeImage(baseColorTexture);
 	}
-	if (normalTexture && descriptorBindingFlags & DescriptorBindingFlags::ImageNormalMap) {
-		imageDescriptors.push_back(normalTexture->descriptor);
-		VkWriteDescriptorSet writeDescriptorSet{
-			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-			.dstSet = descriptorSet,
-			.dstBinding = static_cast<uint32_t>(writeDescriptorSets.size()),
-			.descriptorCount = 1,
-			.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-			.pImageInfo = &normalTexture->descriptor
-		};
-		writeDescriptorSets.push_back(writeDescriptorSet);
+	if (descriptorBindingFlags & DescriptorBindingFlags::ImageMetallicRoughness) {
+		writeImage(metallicRoughnessTexture);
 	}
+	if (descriptorBindingFlags & DescriptorBindingFlags::ImageNormalMap) {
+		writeImage(normalTexture);
+	}
+	if (descriptorBindingFlags & DescriptorBindingFlags::ImageOcclusionMap) {
+		writeImage(occlusionTexture);
+	}
+	if (descriptorBindingFlags & DescriptorBindingFlags::ImageEmissiveMap) {
+		writeImage(emissiveTexture);
+	}
+
 	vkUpdateDescriptorSets(device->logicalDevice, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, nullptr);
 }
 
@@ -1032,7 +1074,13 @@ void vkglTF::Model::loadMaterials(tinygltf::Model &gltfModel)
 		}
 		if (mat.values.find("baseColorFactor") != mat.values.end()) {
 			material.baseColorFactor = glm::make_vec4(mat.values["baseColorFactor"].ColorFactor().data());
-		}				
+		}
+		if (mat.emissiveFactor.size() == 3) {
+			material.emissiveFactor = glm::vec3(
+				static_cast<float>(mat.emissiveFactor[0]),
+				static_cast<float>(mat.emissiveFactor[1]),
+				static_cast<float>(mat.emissiveFactor[2]));
+		}
 		if (mat.additionalValues.find("normalTexture") != mat.additionalValues.end()) {
 			material.normalTexture = getTexture(gltfModel.textures[mat.additionalValues["normalTexture"].TextureIndex()].source);
 		} else {
@@ -1057,10 +1105,35 @@ void vkglTF::Model::loadMaterials(tinygltf::Model &gltfModel)
 			material.alphaCutoff = static_cast<float>(mat.additionalValues["alphaCutoff"].Factor());
 		}
 
+		// Keep descriptors valid for shaders that expect a full material texture set.
+		// TODO: Replace this single black texture with semantic defaults
+		// (white base color/AO, flat normal, neutral metallic-roughness).
+		if (!material.baseColorTexture) {
+			material.baseColorTexture = &emptyTexture;
+		}
+		if (!material.metallicRoughnessTexture) {
+			material.metallicRoughnessTexture = &emptyTexture;
+		}
+		if (!material.normalTexture) {
+			material.normalTexture = &emptyTexture;
+		}
+		if (!material.occlusionTexture) {
+			material.occlusionTexture = &emptyTexture;
+		}
+		if (!material.emissiveTexture) {
+			material.emissiveTexture = &emptyTexture;
+		}
+
 		materials.push_back(material);
 	}
 	// Push a default material at the end of the list for meshes with no material assigned
-	materials.push_back(Material(device));
+	vkglTF::Material defaultMaterial(device);
+	defaultMaterial.baseColorTexture = &emptyTexture;
+	defaultMaterial.metallicRoughnessTexture = &emptyTexture;
+	defaultMaterial.normalTexture = &emptyTexture;
+	defaultMaterial.occlusionTexture = &emptyTexture;
+	defaultMaterial.emissiveTexture = &emptyTexture;
+	materials.push_back(defaultMaterial);
 }
 
 void vkglTF::Model::loadAnimations(tinygltf::Model &gltfModel)
@@ -1350,31 +1423,27 @@ void vkglTF::Model::loadFromFile(std::string filename, vks::VulkanDevice *device
 
 	// Setup descriptors
 	uint32_t uboCount{ 0 };
-	uint32_t imageCount{ 0 };
+	uint32_t materialImageSetCount{ 0 };
 	for (auto& node : linearNodes) {
 		if (node->mesh) {
 			uboCount++;
 		}
 	}
 	for (auto& material : materials) {
-		if (material.baseColorTexture != nullptr) {
-			imageCount++;
+		if (materialHasRequestedImage(material, descriptorBindingFlags)) {
+			materialImageSetCount++;
 		}
 	}
+	const uint32_t imageBindingCount = getMaterialImageBindingCount(descriptorBindingFlags);
 	std::vector<VkDescriptorPoolSize> poolSizes = {
 		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, uboCount },
 	};
-	if (imageCount > 0) {
-		if (descriptorBindingFlags & DescriptorBindingFlags::ImageBaseColor) {
-			poolSizes.push_back({ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageCount });
-		}
-		if (descriptorBindingFlags & DescriptorBindingFlags::ImageNormalMap) {
-			poolSizes.push_back({ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageCount });
-		}
+	if (materialImageSetCount > 0 && imageBindingCount > 0) {
+		poolSizes.push_back({ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, materialImageSetCount * imageBindingCount });
 	}
 	VkDescriptorPoolCreateInfo descriptorPoolCI{
 		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-		.maxSets = uboCount + imageCount,
+		.maxSets = uboCount + materialImageSetCount,
 		.poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
 		.pPoolSizes = poolSizes.data()
 	};
@@ -1399,10 +1468,19 @@ void vkglTF::Model::loadFromFile(std::string filename, vks::VulkanDevice *device
 		if (descriptorSetLayoutImage == VK_NULL_HANDLE) {
 			std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings{};
 			if (descriptorBindingFlags & DescriptorBindingFlags::ImageBaseColor) {
-				setLayoutBindings.push_back({ .binding = static_cast<uint32_t>(setLayoutBindings.size()), .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT });
+				addMaterialImageLayoutBinding(setLayoutBindings);
+			}
+			if (descriptorBindingFlags & DescriptorBindingFlags::ImageMetallicRoughness) {
+				addMaterialImageLayoutBinding(setLayoutBindings);
 			}
 			if (descriptorBindingFlags & DescriptorBindingFlags::ImageNormalMap) {
-				setLayoutBindings.push_back({ .binding = static_cast<uint32_t>(setLayoutBindings.size()), .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT });
+				addMaterialImageLayoutBinding(setLayoutBindings);
+			}
+			if (descriptorBindingFlags & DescriptorBindingFlags::ImageOcclusionMap) {
+				addMaterialImageLayoutBinding(setLayoutBindings);
+			}
+			if (descriptorBindingFlags & DescriptorBindingFlags::ImageEmissiveMap) {
+				addMaterialImageLayoutBinding(setLayoutBindings);
 			}
 			VkDescriptorSetLayoutCreateInfo descriptorLayoutCI{
 				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -1412,7 +1490,7 @@ void vkglTF::Model::loadFromFile(std::string filename, vks::VulkanDevice *device
 			VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device->logicalDevice, &descriptorLayoutCI, nullptr, &descriptorSetLayoutImage));
 		}
 		for (auto& material : materials) {
-			if (material.baseColorTexture != nullptr) {
+			if (materialHasRequestedImage(material, descriptorBindingFlags)) {
 				material.createDescriptorSet(descriptorPool, vkglTF::descriptorSetLayoutImage, descriptorBindingFlags);
 			}
 		}

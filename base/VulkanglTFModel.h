@@ -46,7 +46,10 @@ namespace vkglTF
 {
 	enum DescriptorBindingFlags {
 		ImageBaseColor = 0x00000001,
-		ImageNormalMap = 0x00000002
+		ImageMetallicRoughness = 0x00000002,
+		ImageNormalMap = 0x00000004,
+		ImageOcclusionMap = 0x00000008,
+		ImageEmissiveMap = 0x00000010
 	};
 
 	extern VkDescriptorSetLayout descriptorSetLayoutImage;
@@ -87,6 +90,7 @@ namespace vkglTF
 		float metallicFactor = 1.0f;
 		float roughnessFactor = 1.0f;
 		glm::vec4 baseColorFactor = glm::vec4(1.0f);
+		glm::vec3 emissiveFactor = glm::vec3(0.0f);
 		vkglTF::Texture* baseColorTexture = nullptr;
 		vkglTF::Texture* metallicRoughnessTexture = nullptr;
 		vkglTF::Texture* normalTexture = nullptr;
