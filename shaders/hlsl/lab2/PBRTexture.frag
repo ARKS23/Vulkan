@@ -189,14 +189,15 @@ PBRMaterialSample samplePBRMaterial(float2 uv) {
     float ao = occlusionMap.Sample(occlusionSampler, uv).r;
     float3 emissive = emissiveMap.Sample(emissiveSampler, uv).rgb;
 
-    mat.albedo = pow(saturate(baseColor.rgb), 2.2); // 当前使用的是UNORM, 需要手动sRGB decode
+    // baseColor/emissive 贴图现在以 SRGB 格式创建，采样时 Vulkan 会自动解码到 linear。
+    mat.albedo = saturate(baseColor.rgb);
     mat.alpha = baseColor.a;
 
     mat.roughness = clamp(metallicRoughness.g, 0.04, 1.0);
     mat.metallic = saturate(metallicRoughness.b);
     mat.ao = saturate(ao);
 
-    mat.emissive = pow(saturate(emissive), 2.2); // 同样需要sRGB decode
+    mat.emissive = saturate(emissive);
     return mat;
 }
 
@@ -233,6 +234,16 @@ float3 getWorldNormal2(FSInput input) {
     float3x3 TBN = float3x3(T * invMax, B * invMax, N);
 
     return normalize(mul(tangentNormal, TBN));
+}
+
+// ----------------------------------------- 后处理 -----------------------------------------
+float3 ACESFilm(float3 x) {
+    float a = 2.51;
+    float b = 0.03;
+    float c = 2.43;
+    float d = 0.59;
+    float e = 0.14;
+    return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
 }
 
 FSOutput main(FSInput input) {
@@ -273,13 +284,13 @@ FSOutput main(FSInput input) {
     }
 
     // 自发光
-    float emissiveStrength = 10.0;
+    float emissiveStrength = 300.0;
     emissive *= emissiveStrength;
 
     float3 color = ambient + Lo + emissive;
 
     color = color / (color + 1.0);
-    color = pow(saturate(color), 1.0 / 2.2);
+    color = ACESFilm(color);
 
     output.color = float4(color, 1.0);
     return output;

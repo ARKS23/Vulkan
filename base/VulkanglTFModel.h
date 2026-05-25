@@ -76,7 +76,7 @@ namespace vkglTF
 		uint32_t index;
 		void updateDescriptor();
 		void destroy();
-		void fromglTfImage(tinygltf::Image& gltfimage, std::string path, vks::VulkanDevice* device, VkQueue copyQueue);
+		void fromglTfImage(tinygltf::Image& gltfimage, std::string path, vks::VulkanDevice* device, VkQueue copyQueue, VkFormat imageFormat = VK_FORMAT_R8G8B8A8_UNORM);
 	};
 
 	/*

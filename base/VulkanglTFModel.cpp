@@ -100,7 +100,7 @@ void vkglTF::Texture::destroy()
 	}
 }
 
-void vkglTF::Texture::fromglTfImage(tinygltf::Image &gltfimage, std::string path, vks::VulkanDevice *device, VkQueue copyQueue)
+void vkglTF::Texture::fromglTfImage(tinygltf::Image &gltfimage, std::string path, vks::VulkanDevice *device, VkQueue copyQueue, VkFormat imageFormat)
 {
 	this->device = device;
 
@@ -142,7 +142,9 @@ void vkglTF::Texture::fromglTfImage(tinygltf::Image &gltfimage, std::string path
 		}
 		assert(buffer);
 
-		format = VK_FORMAT_R8G8B8A8_UNORM;
+		// glTF color textures are authored in sRGB, while data textures
+		// such as normal/metallic-roughness/AO must remain linear UNORM.
+		format = imageFormat;
 
 		width = gltfimage.width;
 		height = gltfimage.height;
@@ -1045,9 +1047,31 @@ void vkglTF::Model::loadSkins(tinygltf::Model &gltfModel)
 
 void vkglTF::Model::loadImages(tinygltf::Model &gltfModel, vks::VulkanDevice *device, VkQueue transferQueue)
 {
-	for (tinygltf::Image &image : gltfModel.images) {
+	std::vector<VkFormat> imageFormats(gltfModel.images.size(), VK_FORMAT_R8G8B8A8_UNORM);
+	auto markSrgbTexture = [&](int textureIndex) {
+		if (textureIndex < 0 || textureIndex >= static_cast<int>(gltfModel.textures.size())) {
+			return;
+		}
+		const int sourceImage = gltfModel.textures[textureIndex].source;
+		if (sourceImage >= 0 && sourceImage < static_cast<int>(imageFormats.size())) {
+			imageFormats[sourceImage] = VK_FORMAT_R8G8B8A8_SRGB;
+		}
+	};
+	for (tinygltf::Material& material : gltfModel.materials) {
+		auto baseColorTexture = material.values.find("baseColorTexture");
+		if (baseColorTexture != material.values.end()) {
+			markSrgbTexture(baseColorTexture->second.TextureIndex());
+		}
+		auto emissiveTexture = material.additionalValues.find("emissiveTexture");
+		if (emissiveTexture != material.additionalValues.end()) {
+			markSrgbTexture(emissiveTexture->second.TextureIndex());
+		}
+	}
+
+	for (size_t imageIndex = 0; imageIndex < gltfModel.images.size(); ++imageIndex) {
+		tinygltf::Image& image = gltfModel.images[imageIndex];
 		vkglTF::Texture texture;
-		texture.fromglTfImage(image, path, device, transferQueue);
+		texture.fromglTfImage(image, path, device, transferQueue, imageFormats[imageIndex]);
 		texture.index = static_cast<uint32_t>(textures.size());
 		textures.push_back(texture);
 	}

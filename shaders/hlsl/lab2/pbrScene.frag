@@ -152,6 +152,16 @@ float3 computeSpecularIBL(float3 N, float3 V, float3 F0, float roughness) {
     return color;
 }
 
+// --------------------------------------------- 后处理 ---------------------------------------------
+float3 ACESFilm(float3 x) {
+    float a = 2.51;
+    float b = 0.03;
+    float c = 2.43;
+    float d = 0.59;
+    float e = 0.14;
+    return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
+}
+
 FSOutput main(FSInput input) {
     FSOutput output;
 
@@ -186,7 +196,7 @@ FSOutput main(FSInput input) {
     float3 color = ambient + Lo;
 
     color = color / (color + 1.0);
-    color = pow(saturate(color), 1.0 / 2.2);
+    color = ACESFilm(color);
 
     output.color = float4(color, 1.0);
     return output;
