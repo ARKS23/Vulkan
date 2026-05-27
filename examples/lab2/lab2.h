@@ -232,6 +232,7 @@ public:
     float bloomStrength = 0.08f;
     float bloomFilterRadius = 0.5f;
     int bloomMipCount = 5;
+    int useKaris = 1;
     
 public:
     VulkanExample();

@@ -56,6 +56,7 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay *overlay) {
 
     if (overlay->header("BloomSettings")) {
         overlay->sliderInt("Enable Bloom", &enableBloom, 0, 1);
+        overlay->sliderInt("Use Karis Average", &useKaris, 0, 1);
         overlay->sliderFloat("Exposure", &exposure, 0.2f, 1.0f);
         overlay->sliderFloat("Bloom Strength", &bloomStrength, 0.0f, 0.5f);
         overlay->sliderFloat("Bloom Filter Radius", &bloomFilterRadius, 0.1f, 5.0f);
@@ -578,9 +579,14 @@ void VulkanExample::createFullScreenPipeline() {
 }
 
 void VulkanExample::createBloomPipelinesLayout() {
+    struct BloomDownsamplePushConstants {
+        glm::vec2 inputTextureSize;
+        int useKairsWeight;
+        float padding;
+    };
     VkPipelineLayoutCreateInfo downsampleLayoutCI = vks::initializers::pipelineLayoutCreateInfo(&bloomDescriptorSetLayouts.sampleDescriptorSetLayout, 1);
     std::vector<VkPushConstantRange> downsamplePushConstants = {
-        vks::initializers::pushConstantRange(VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(glm::vec2), 0) // 输入纹理的尺寸
+        vks::initializers::pushConstantRange(VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(BloomDownsamplePushConstants), 0)
     };
     downsampleLayoutCI.pushConstantRangeCount = 1;
     downsampleLayoutCI.pPushConstantRanges = downsamplePushConstants.data();
@@ -963,7 +969,15 @@ void VulkanExample::cmdDrawBloomDownsample(VkCommandBuffer cmd) {
             VkDescriptorSet srcSet = (i == 0) ? bloomDescriptorSets.hdrSceneSet : bloomDescriptorSets.mipSets[i - 1];
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, bloomPipelinesLayout.bloomDownsamplePipelineLayout, 0, 1, &srcSet, 0, nullptr);
             glm::vec2 srcResolution {srcExtent.width, srcExtent.height};    // 采样分辨率
-            vkCmdPushConstants(cmd, bloomPipelinesLayout.bloomDownsamplePipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(glm::vec2), &srcResolution);
+
+            int useKarisWeight = (i == 0) ? 1 : 0; // 只有第一次下采样使用Karis权重，后续级别使用13权重
+            if (!useKaris)  useKarisWeight = 0;
+            struct PC {
+                glm::vec2 srcResolution;
+                int useKairsWeight;
+                float padding; // 对齐到 16 字节
+            } pc {srcResolution, useKarisWeight, 0.0f};
+            vkCmdPushConstants(cmd, bloomPipelinesLayout.bloomDownsamplePipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PC), &pc);
             vkCmdDraw(cmd, 3, 1, 0, 0);
         }
         vkutil::cmdEndRendering(cmd);
