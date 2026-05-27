@@ -275,7 +275,7 @@ FSOutput main(FSInput input) {
     }
 
     // 自发光
-    float emissiveStrength = 30.0;
+    float emissiveStrength = 100.0;
     emissive *= emissiveStrength;
 
     float3 color = ambient + Lo + emissive;

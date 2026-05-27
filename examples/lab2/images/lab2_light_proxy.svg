@@ -1,0 +1,78 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="650" viewBox="0 0 1200 650">
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#1f5f9f"/>
+    </marker>
+    <marker id="arrowG" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#2f9c5d"/>
+    </marker>
+    <style>
+      .title { font: 800 38px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #10223d; }
+      .sub { font: 500 18px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #5a6d80; }
+      .box { fill: #f5fbff; stroke: #1f70c1; stroke-width: 2.2; rx: 14; }
+      .boxG { fill: #f3fff6; stroke: #2f9c5d; stroke-width: 2.2; rx: 14; }
+      .boxO { fill: #fff7ec; stroke: #df7d17; stroke-width: 2.2; rx: 14; }
+      .label { font: 800 23px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #14213d; }
+      .small { font: 16px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #34495e; }
+      .tiny { font: 13px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #4b5c6b; }
+      .code { font: 700 15px Consolas, "Microsoft YaHei", monospace; fill: #15365a; }
+    </style>
+    <radialGradient id="lamp" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fff9d6"/>
+      <stop offset="35%" stop-color="#ffcf6b"/>
+      <stop offset="100%" stop-color="#f97316"/>
+    </radialGradient>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="650" fill="#f8fafc"/>
+  <text x="600" y="48" text-anchor="middle" class="title">光源绘制：PBR 强度与可视化强度分开</text>
+  <text x="600" y="80" text-anchor="middle" class="sub">同一盏灯有两条数据路径：照亮别人，和让自己看起来发光</text>
+
+  <rect x="55" y="130" width="295" height="185" class="box"/>
+  <text x="85" y="165" class="label">PBR 光照数据</text>
+  <text x="85" y="205" class="code">UBOLights.lightIntensity[i]</text>
+  <text x="85" y="235" class="small">进入 pbrScene / PBRTexture shader</text>
+  <text x="85" y="263" class="small">参与 BRDF、衰减、NdotL</text>
+  <text x="85" y="292" class="tiny">控制：物体被照亮多少</text>
+
+  <rect x="55" y="365" width="295" height="185" class="boxO"/>
+  <text x="85" y="400" class="label">可视化发光数据</text>
+  <text x="85" y="440" class="code">lightVisualIntensity[i]</text>
+  <text x="85" y="470" class="small">进入 light.frag</text>
+  <text x="85" y="498" class="small">直接输出 emissive HDR color</text>
+  <text x="85" y="527" class="tiny">控制：光源球自己有多亮</text>
+
+  <rect x="455" y="145" width="320" height="155" class="boxG"/>
+  <text x="485" y="182" class="label">PBR Surface Shading</text>
+  <text x="485" y="220" class="code">radiance = color * intensity * attenuation</text>
+  <text x="485" y="253" class="small">照亮球阵列、模型、金属反射</text>
+
+  <rect x="455" y="380" width="320" height="155" class="boxO"/>
+  <text x="485" y="417" class="label">Visible Light Sphere</text>
+  <text x="485" y="455" class="code">color = Color * VisualIntensity</text>
+  <text x="485" y="488" class="small">写入 HDR scene，触发 Bloom</text>
+
+  <line x1="350" y1="222" x2="445" y2="222" stroke="#1f5f9f" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="350" y1="455" x2="445" y2="455" stroke="#df7d17" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="880" y="185" width="235" height="280" class="box"/>
+  <text x="997" y="222" text-anchor="middle" class="label">HDR Scene</text>
+  <circle cx="997" cy="305" r="44" fill="url(#lamp)" filter="url(#glow)"/>
+  <circle cx="997" cy="305" r="76" fill="none" stroke="#ffcc80" stroke-width="16" opacity="0.22"/>
+  <circle cx="997" cy="305" r="106" fill="none" stroke="#ffb74d" stroke-width="12" opacity="0.13"/>
+  <text x="997" y="405" text-anchor="middle" class="small">球体发光 + 周围 Bloom</text>
+  <text x="997" y="435" text-anchor="middle" class="tiny">视觉效果来自 emissive HDR 值</text>
+
+  <path d="M775,222 C825,222 835,260 870,290" fill="none" stroke="#2f9c5d" stroke-width="3" marker-end="url(#arrowG)"/>
+  <path d="M775,455 C825,455 835,375 870,328" fill="none" stroke="#df7d17" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="110" y="585" width="980" height="45" fill="#ffffff" stroke="#c8d2dc" stroke-width="1.8" rx="12"/>
+  <text x="600" y="614" text-anchor="middle" class="small">复习口诀：Intensity 管“照别人”，VisualIntensity 管“自己亮”，Bloom 管“亮处扩散”。</text>
+</svg>

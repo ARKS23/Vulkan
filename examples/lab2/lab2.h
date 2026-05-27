@@ -90,6 +90,7 @@ public:
         glm::vec4 Pos;
         glm::vec4 Color;
         glm::vec4 Intensity;
+        glm::vec4 VisualIntensity;
     };
 
     struct Piplelines {
@@ -191,6 +192,12 @@ public:
     // push constant
     glm::vec3 objectPos = {0.0f, 0.0f, 0.0f};
     PushconstantsLight pushconstantsLight;
+    glm::vec4 lightVisualIntensity[4] = {
+        glm::vec4(14.0f, 14.0f, 14.0f, 1.0f),
+        glm::vec4(12.0f, 12.0f, 12.0f, 1.0f),
+        glm::vec4(16.0f, 16.0f, 16.0f, 1.0f),
+        glm::vec4(10.0f, 10.0f, 10.0f, 1.0f)
+    };
 
     // 场景
     std::vector<vkglTF::Model> objects;
@@ -222,8 +229,8 @@ public:
     BloomPipelines bloomPipelines;
     int enableBloom = 1;
     float exposure = 1.0f;
-    float bloomStrength = 1.0f;
-    float bloomFilterRadius = 1.0f;
+    float bloomStrength = 0.08f;
+    float bloomFilterRadius = 0.5f;
     int bloomMipCount = 5;
     
 public:
@@ -313,7 +320,7 @@ private:
     const std::string bloomCompositeVertexShader = fullScreenVertexShader;
     const std::string bloomCompositeFragmentShader = "lab2/composite.frag.spv";
 
-    const std::string hdrFilePath = "textures/hdr/church.ktx";
+    const std::string hdrFilePath = "textures/hdr/pisa_cube.ktx";
 };
 
 VULKAN_EXAMPLE_MAIN();

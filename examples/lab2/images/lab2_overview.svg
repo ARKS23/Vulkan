@@ -1,0 +1,87 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
+  <defs>
+    <marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#1f5f9f"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#d97706"/>
+    </marker>
+    <style>
+      .title { font: 700 38px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #10223d; }
+      .sub { font: 500 18px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #526579; }
+      .label { font: 700 20px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #14213d; }
+      .small { font: 15px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #34495e; }
+      .tiny { font: 13px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #4b5c6b; }
+      .code { font: 600 15px Consolas, "Microsoft YaHei", monospace; fill: #18324d; }
+      .panel { fill: #f5fbff; stroke: #1f73c9; stroke-width: 2.2; rx: 14; }
+      .panel2 { fill: #fff8ed; stroke: #e08a1e; stroke-width: 2.2; rx: 14; }
+      .panel3 { fill: #f2fff6; stroke: #35a768; stroke-width: 2.2; rx: 14; }
+      .badge { fill: #154f9d; rx: 8; }
+      .badgeText { font: 700 18px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: white; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="720" fill="#f7f9fb"/>
+  <text x="600" y="50" text-anchor="middle" class="title">Lab2 渲染链路总览</text>
+  <text x="600" y="80" text-anchor="middle" class="sub">从材质、光源和环境贴图开始，到 HDR / Bloom / Tone Mapping 输出到屏幕</text>
+
+  <rect x="30" y="115" width="260" height="150" class="panel"/>
+  <rect x="48" y="132" width="36" height="30" class="badge"/>
+  <text x="66" y="154" text-anchor="middle" class="badgeText">1</text>
+  <text x="98" y="154" class="label">输入数据</text>
+  <text x="58" y="190" class="small">glTF 模型与 PBR 贴图</text>
+  <text x="58" y="218" class="small">HDR 环境贴图</text>
+  <text x="58" y="246" class="small">点光源位置 / 颜色 / 强度</text>
+
+  <rect x="360" y="115" width="260" height="150" class="panel2"/>
+  <rect x="378" y="132" width="36" height="30" fill="#c76b00" rx="8"/>
+  <text x="396" y="154" text-anchor="middle" class="badgeText">2</text>
+  <text x="428" y="154" class="label">IBL 预计算</text>
+  <text x="388" y="190" class="small">Irradiance Cubemap</text>
+  <text x="388" y="218" class="small">Prefiltered Environment</text>
+  <text x="388" y="246" class="small">BRDF LUT</text>
+
+  <rect x="700" y="115" width="450" height="150" class="panel3"/>
+  <rect x="718" y="132" width="36" height="30" fill="#238a50" rx="8"/>
+  <text x="736" y="154" text-anchor="middle" class="badgeText">3</text>
+  <text x="768" y="154" class="label">HDR Scene Pass</text>
+  <text x="728" y="190" class="small">PBR Basic 球阵列 + PBR Texture 模型</text>
+  <text x="728" y="218" class="small">Light Sphere 可视化发光体 + Skybox</text>
+  <text x="728" y="246" class="code">VK_FORMAT_R16G16B16A16_SFLOAT</text>
+
+  <line x1="290" y1="190" x2="350" y2="190" stroke="#1f5f9f" stroke-width="3" marker-end="url(#arrowBlue)"/>
+  <line x1="620" y1="190" x2="690" y2="190" stroke="#1f5f9f" stroke-width="3" marker-end="url(#arrowBlue)"/>
+
+  <rect x="85" y="345" width="245" height="135" class="panel"/>
+  <rect x="103" y="363" width="36" height="30" class="badge"/>
+  <text x="121" y="385" text-anchor="middle" class="badgeText">4</text>
+  <text x="153" y="385" class="label">Bloom Downsample</text>
+  <text x="112" y="420" class="small">HDR scene → mip0</text>
+  <text x="112" y="448" class="small">mip0 → mip1 → mip2...</text>
+  <text x="112" y="470" class="tiny">13-tap 过滤，逐级降低分辨率</text>
+
+  <rect x="430" y="345" width="245" height="135" class="panel"/>
+  <rect x="448" y="363" width="36" height="30" class="badge"/>
+  <text x="466" y="385" text-anchor="middle" class="badgeText">5</text>
+  <text x="498" y="385" class="label">Bloom Upsample</text>
+  <text x="457" y="420" class="small">小 mip → 大 mip</text>
+  <text x="457" y="448" class="small">Additive Blend 累加</text>
+  <text x="457" y="470" class="tiny">不同尺度的光晕被逐层混合</text>
+
+  <rect x="775" y="345" width="310" height="135" class="panel2"/>
+  <rect x="793" y="363" width="36" height="30" fill="#c76b00" rx="8"/>
+  <text x="811" y="385" text-anchor="middle" class="badgeText">6</text>
+  <text x="843" y="385" class="label">Composite + Display</text>
+  <text x="802" y="420" class="small">HDR scene + bloom * strength</text>
+  <text x="802" y="448" class="small">Exposure → ACES → Gamma</text>
+  <text x="802" y="470" class="tiny">最后写入 swapchain</text>
+
+  <path d="M925,265 C925,300 210,300 210,335" fill="none" stroke="#1f5f9f" stroke-width="3" marker-end="url(#arrowBlue)"/>
+  <line x1="330" y1="412" x2="420" y2="412" stroke="#1f5f9f" stroke-width="3" marker-end="url(#arrowBlue)"/>
+  <line x1="675" y1="412" x2="765" y2="412" stroke="#d97706" stroke-width="3" marker-end="url(#arrowOrange)"/>
+
+  <rect x="70" y="555" width="1060" height="105" fill="#ffffff" stroke="#b8c7d9" stroke-width="2" rx="14"/>
+  <text x="95" y="590" class="label">我需要抓住的主线</text>
+  <text x="95" y="625" class="small">材质参数决定表面反射，光源和 IBL 决定入射光，HDR 保存高亮，Bloom 扩散高亮，Tone Mapping/Gamma 负责最终显示。</text>
+  <text x="95" y="650" class="tiny">调试时按顺序排查：PBR 材质 → IBL 预计算 → HDR 写入 → Bloom mip 链 → Composite。</text>
+</svg>

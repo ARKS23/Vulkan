@@ -56,9 +56,9 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay *overlay) {
 
     if (overlay->header("BloomSettings")) {
         overlay->sliderInt("Enable Bloom", &enableBloom, 0, 1);
-        overlay->sliderFloat("Exposure", &exposure, 0.05f, 1.0f);
-        overlay->sliderFloat("Bloom Strength", &bloomStrength, 0.0f, 1.0f);
-        overlay->sliderFloat("Bloom Filter Radius", &bloomFilterRadius, 0.1f, 10.0f);
+        overlay->sliderFloat("Exposure", &exposure, 0.2f, 1.0f);
+        overlay->sliderFloat("Bloom Strength", &bloomStrength, 0.0f, 0.5f);
+        overlay->sliderFloat("Bloom Filter Radius", &bloomFilterRadius, 0.1f, 5.0f);
     }
 }
 
@@ -914,6 +914,7 @@ void VulkanExample::cmdDrawLight(VkCommandBuffer cmd) {
             pushconstantsLight.Pos = UBOLights.lightsPos[i];
             pushconstantsLight.Color = UBOLights.lightsColor[i];
             pushconstantsLight.Intensity = UBOLights.lightIntensity[i];
+            pushconstantsLight.VisualIntensity = lightVisualIntensity[i];
             vkCmdPushConstants(cmd, pipelinesLayout.lightPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pushconstantsLight), &pushconstantsLight);
             lightObject.draw(cmd);
         }
@@ -1011,7 +1012,7 @@ void VulkanExample::cmdDrawBloomComposite(VkCommandBuffer cmd) {
             float bloomStrength;
             uint32_t enableBloom;
             float padding;
-        }pc {exposure, bloomStrength, enableBloom, 0.0f};
+        }pc {exposure, bloomStrength, static_cast<uint32_t>(enableBloom), 0.0f};
         vkCmdPushConstants(cmd, bloomPipelinesLayout.bloomCompositePipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PC), &pc);
         vkCmdDraw(cmd, 3, 1, 0, 0);
         drawUI(cmd);

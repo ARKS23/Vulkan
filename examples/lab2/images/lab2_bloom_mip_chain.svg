@@ -1,0 +1,84 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620">
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#2672a9"/>
+    </marker>
+    <marker id="arrowUp" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#e07a18"/>
+    </marker>
+    <style>
+      .title { font: 800 34px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #10223d; }
+      .sub { font: 500 17px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #566b80; }
+      .label { font: 700 17px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #17334d; }
+      .small { font: 14px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #3e5364; }
+      .step { font: 700 15px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #2672a9; }
+      .mip { fill: #a9d9dc; stroke: #4f91a6; stroke-width: 2; }
+      .panel { fill: #f6fff3; stroke: #b8c7b2; stroke-width: 2.4; rx: 12; }
+      .note { fill: #ffffff; stroke: #c8d2dc; stroke-width: 1.7; rx: 10; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="620" fill="#f7f9fb"/>
+  <text x="600" y="44" text-anchor="middle" class="title">Physically Based Bloom：Downsample / Upsample Mip Chain</text>
+  <text x="600" y="72" text-anchor="middle" class="sub">先逐级降低 HDR 图像分辨率，再从小 mip 往大 mip 累加光晕，最后合成回 HDR source</text>
+
+  <rect x="30" y="105" width="1140" height="360" class="panel"/>
+
+  <text x="92" y="135" class="label">FullRes: HDR Scene</text>
+  <rect x="70" y="165" width="260" height="170" class="mip"/>
+  <text x="200" y="255" text-anchor="middle" class="small">1920 × 1080</text>
+  <text x="200" y="360" text-anchor="middle" class="small">原始 HDR 场景</text>
+
+  <rect x="450" y="190" width="165" height="110" class="mip"/>
+  <text x="532" y="182" text-anchor="middle" class="label">A: mip0</text>
+  <text x="532" y="250" text-anchor="middle" class="small">960 × 540</text>
+
+  <rect x="700" y="215" width="100" height="70" class="mip"/>
+  <text x="750" y="206" text-anchor="middle" class="label">B: mip1</text>
+  <text x="750" y="255" text-anchor="middle" class="small">480 × 270</text>
+
+  <rect x="875" y="230" width="62" height="44" class="mip"/>
+  <text x="906" y="220" text-anchor="middle" class="label">C</text>
+  <text x="906" y="259" text-anchor="middle" class="small">240 × 135</text>
+
+  <rect x="1010" y="239" width="36" height="26" class="mip"/>
+  <text x="1028" y="228" text-anchor="middle" class="label">D</text>
+  <text x="1028" y="279" text-anchor="middle" class="small">120 × 67</text>
+
+  <rect x="1100" y="245" width="20" height="16" class="mip"/>
+  <text x="1110" y="234" text-anchor="middle" class="label">E</text>
+  <text x="1110" y="279" text-anchor="middle" class="small">60 × 33</text>
+
+  <line x1="335" y1="250" x2="440" y2="250" stroke="#2672a9" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="387" y="238" text-anchor="middle" class="step">Downsample</text>
+  <text x="387" y="270" text-anchor="middle" class="small">(1)</text>
+  <line x1="615" y1="250" x2="690" y2="250" stroke="#2672a9" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="652" y="238" text-anchor="middle" class="small">(2)</text>
+  <line x1="800" y1="250" x2="865" y2="250" stroke="#2672a9" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="832" y="238" text-anchor="middle" class="small">(3)</text>
+  <line x1="937" y1="250" x2="1000" y2="250" stroke="#2672a9" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="968" y="238" text-anchor="middle" class="small">(4)</text>
+  <line x1="1046" y1="252" x2="1090" y2="252" stroke="#2672a9" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="1068" y="238" text-anchor="middle" class="small">(5)</text>
+
+  <path d="M1110,265 L1110,395 L1030,395 L1030,276" fill="none" stroke="#e07a18" stroke-width="3" marker-end="url(#arrowUp)"/>
+  <text x="1138" y="340" class="small">Blur +</text>
+  <text x="1138" y="360" class="small">Upsample</text>
+  <path d="M1028,265 L1028,405 L907,405 L907,276" fill="none" stroke="#e07a18" stroke-width="3" marker-end="url(#arrowUp)"/>
+  <path d="M906,275 L906,415 L750,415 L750,287" fill="none" stroke="#e07a18" stroke-width="3" marker-end="url(#arrowUp)"/>
+  <path d="M750,287 L750,425 L532,425 L532,302" fill="none" stroke="#e07a18" stroke-width="3" marker-end="url(#arrowUp)"/>
+  <path d="M532,302 L532,440 L200,440 L200,340" fill="none" stroke="#e07a18" stroke-width="3" marker-end="url(#arrowUp)"/>
+  <text x="370" y="432" text-anchor="middle" class="step" fill="#e07a18">Upsample and mix</text>
+
+  <rect x="70" y="495" width="330" height="80" class="note"/>
+  <text x="95" y="525" class="label">Downsample</text>
+  <text x="95" y="552" class="small">不使用混合；当前 mip 是新的滤波结果。</text>
+
+  <rect x="435" y="495" width="330" height="80" class="note"/>
+  <text x="460" y="525" class="label">Upsample</text>
+  <text x="460" y="552" class="small">开启 Additive Blend；把小 mip 光晕累加到大 mip。</text>
+
+  <rect x="800" y="495" width="330" height="80" class="note"/>
+  <text x="825" y="525" class="label">Composite</text>
+  <text x="825" y="552" class="small">HDR scene + bloom * strength，再 ACES + Gamma。</text>
+</svg>

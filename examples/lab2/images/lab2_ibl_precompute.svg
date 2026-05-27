@@ -1,0 +1,102 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="820" viewBox="0 0 1200 820">
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#1558a8"/>
+    </marker>
+    <marker id="arrowO" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#ea7a19"/>
+    </marker>
+    <style>
+      .title { font: 800 42px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #0f2745; }
+      .subtitle { font: 600 20px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #587087; }
+      .box { fill: #f5fbff; stroke: #1c70c9; stroke-width: 2.3; rx: 14; }
+      .boxO { fill: #fff7ea; stroke: #ed8a23; stroke-width: 2.3; rx: 14; }
+      .boxG { fill: #f3fff6; stroke: #2ca765; stroke-width: 2.3; rx: 14; }
+      .head { fill: #164f9d; rx: 8; }
+      .headO { fill: #d76b0b; rx: 8; }
+      .htext { font: 800 22px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: white; }
+      .label { font: 800 22px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #13233d; }
+      .small { font: 16px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #33485f; }
+      .tiny { font: 13px "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; fill: #486072; }
+      .code { font: 700 17px Consolas, "Microsoft YaHei", monospace; fill: #0f335c; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="820" fill="#fbfcfe"/>
+  <text x="600" y="50" text-anchor="middle" class="title">PBR IBL 预计算流程图</text>
+  <text x="600" y="82" text-anchor="middle" class="subtitle">从 HDR 环境图生成 Irradiance / Prefilter / BRDF LUT</text>
+
+  <rect x="55" y="120" width="260" height="120" class="box"/>
+  <rect x="75" y="140" width="34" height="30" class="head"/>
+  <text x="92" y="162" text-anchor="middle" class="htext">1</text>
+  <text x="125" y="162" class="label">HDR 全景图</text>
+  <rect x="88" y="185" width="190" height="30" fill="#b6d8f0" stroke="#6da5cc"/>
+  <path d="M88,185 C130,165 155,225 195,190 C225,168 245,208 278,185" fill="none" stroke="#ffffff" stroke-width="5"/>
+  <text x="185" y="232" text-anchor="middle" class="tiny">Equirectangular Map</text>
+
+  <rect x="430" y="120" width="260" height="120" class="box"/>
+  <rect x="450" y="140" width="34" height="30" class="head"/>
+  <text x="467" y="162" text-anchor="middle" class="htext">2</text>
+  <text x="500" y="162" class="label">环境立方体贴图</text>
+  <g transform="translate(505,177)">
+    <rect x="45" y="0" width="42" height="42" fill="#b6d8f0" stroke="#357ab7"/>
+    <rect x="0" y="42" width="42" height="42" fill="#d5e9f6" stroke="#357ab7"/>
+    <rect x="45" y="42" width="42" height="42" fill="#9dc9e5" stroke="#357ab7"/>
+    <rect x="90" y="42" width="42" height="42" fill="#c8e1f2" stroke="#357ab7"/>
+    <rect x="45" y="84" width="42" height="42" fill="#91bfdc" stroke="#357ab7"/>
+  </g>
+
+  <line x1="315" y1="180" x2="420" y2="180" stroke="#1558a8" stroke-width="3.2" marker-end="url(#arrow)"/>
+  <text x="367" y="168" text-anchor="middle" class="tiny">方向 dir → cubemap face</text>
+
+  <rect x="120" y="340" width="310" height="155" class="boxG"/>
+  <rect x="140" y="360" width="34" height="30" fill="#218350" rx="8"/>
+  <text x="157" y="382" text-anchor="middle" class="htext">A</text>
+  <text x="190" y="382" class="label">Irradiance Cubemap</text>
+  <text x="150" y="418" class="small">Diffuse Convolution</text>
+  <text x="150" y="446" class="small">输入方向：N 法线方向</text>
+  <text x="150" y="474" class="small">结果：低频、模糊、漫反射环境光</text>
+
+  <rect x="520" y="340" width="350" height="155" class="box"/>
+  <rect x="540" y="360" width="34" height="30" class="head"/>
+  <text x="557" y="382" text-anchor="middle" class="htext">B</text>
+  <text x="590" y="382" class="label">Prefiltered Environment</text>
+  <text x="550" y="418" class="small">Specular Prefilter + mipmap</text>
+  <text x="550" y="446" class="small">输入方向：R = reflect(-V, N)</text>
+  <text x="550" y="474" class="small">roughness 越大，采样 mip 越模糊</text>
+
+  <rect x="930" y="135" width="205" height="320" class="boxO"/>
+  <rect x="950" y="155" width="34" height="30" class="headO"/>
+  <text x="967" y="177" text-anchor="middle" class="htext">C</text>
+  <text x="1000" y="177" class="label">BRDF LUT</text>
+  <rect x="985" y="220" width="95" height="95" fill="#ffd28a" stroke="#de7d16"/>
+  <path d="M995,300 C1015,260 1035,245 1070,228" fill="none" stroke="#c65a00" stroke-width="5"/>
+  <path d="M998,292 L1076,292 M1000,292 L1000,224" stroke="#a84b00" stroke-width="2"/>
+  <text x="1032" y="350" text-anchor="middle" class="small">积分预计算</text>
+  <text x="1032" y="380" text-anchor="middle" class="tiny">输入：NdotV + roughness</text>
+  <text x="1032" y="407" text-anchor="middle" class="tiny">输出：brdf.x / brdf.y</text>
+
+  <path d="M560,240 C560,295 280,295 280,330" fill="none" stroke="#2ca765" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M590,240 C590,295 690,295 690,330" fill="none" stroke="#1558a8" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M690,180 C800,180 865,180 920,245" fill="none" stroke="#ea7a19" stroke-width="3" marker-end="url(#arrowO)"/>
+
+  <g transform="translate(900,485)">
+    <text x="0" y="0" class="small">Prefilter mip 链：</text>
+    <rect x="0" y="20" width="90" height="28" fill="#b6d8f0" stroke="#4f8bbb"/>
+    <text x="100" y="40" class="tiny">mip 0 = roughness 0.0 / 清晰</text>
+    <rect x="0" y="58" width="72" height="25" fill="#a8bfd0" stroke="#4f8bbb"/>
+    <text x="100" y="77" class="tiny">mip 1 = 轻微模糊</text>
+    <rect x="0" y="94" width="55" height="22" fill="#9aa8b5" stroke="#4f8bbb"/>
+    <text x="100" y="111" class="tiny">mip 2 = 中等模糊</text>
+    <rect x="0" y="128" width="38" height="20" fill="#8d9299" stroke="#4f8bbb"/>
+    <text x="100" y="144" class="tiny">mip 3+ = 很粗糙</text>
+  </g>
+
+  <rect x="65" y="595" width="1070" height="140" fill="#ffffff" stroke="#b8c7d9" stroke-width="2" rx="14"/>
+  <text x="95" y="630" class="label">运行时在 PBR 着色中怎么用</text>
+  <text x="95" y="668" class="code">Diffuse IBL  = irradianceMap.Sample(N) * albedo * kd</text>
+  <text x="95" y="705" class="code">Specular IBL = prefilteredMap.SampleLevel(R, roughnessMip) * (F * brdf.x + brdf.y)</text>
+  <text x="755" y="668" class="tiny">Irradiance：负责漫反射环境光</text>
+  <text x="755" y="695" class="tiny">Prefilter：负责镜面反射看到什么</text>
+  <text x="755" y="722" class="tiny">BRDF LUT：修正视角与粗糙度相关项</text>
+</svg>

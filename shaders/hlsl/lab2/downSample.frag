@@ -63,6 +63,7 @@ FSOutput main(FSInput input) {
     FSOutput output;
     float2 texelSize = 1.0 / bloomPushConstants.srcResolution;
     float3 color = downSample(texelSize, input.UV);
+    color = max(color, 0.0001f.xxx); // 防黑盒效应
     output.color = float4(color, 1.0);
     return output;
 }
