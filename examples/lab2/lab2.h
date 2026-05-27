@@ -94,6 +94,7 @@ public:
 
     struct Piplelines {
         VkPipeline scenePipeline = {VK_NULL_HANDLE};
+        VkPipeline fullScreenPipeline = {VK_NULL_HANDLE};
         VkPipeline pbrTexturePipeline = {VK_NULL_HANDLE};
         VkPipeline skyboxPipeline = {VK_NULL_HANDLE};
         VkPipeline lightPipeline = {VK_NULL_HANDLE};
@@ -101,6 +102,7 @@ public:
 
     struct PipelinesLayout {
         VkPipelineLayout scenePipelineLayout = {VK_NULL_HANDLE};
+        VkPipelineLayout fullScreenPipelineLayout = {VK_NULL_HANDLE};
         VkPipelineLayout pbrTexturePipelineLayout = {VK_NULL_HANDLE};
         VkPipelineLayout skyboxPipelineLayout = {VK_NULL_HANDLE};
         VkPipelineLayout lightPipelineLayout = {VK_NULL_HANDLE};
@@ -108,6 +110,7 @@ public:
 
     struct DescriptorSets {
         VkDescriptorSet sceneDescriptor{ VK_NULL_HANDLE };
+        VkDescriptorSet fullScreenDescriptor{ VK_NULL_HANDLE };
         VkDescriptorSet pbrTextureDescriptor{ VK_NULL_HANDLE };
         VkDescriptorSet skyboxDescriptor{ VK_NULL_HANDLE };
         VkDescriptorSet lightDescriptor{ VK_NULL_HANDLE };
@@ -115,8 +118,54 @@ public:
 
     struct DescriptorSetLayouts {
         VkDescriptorSetLayout sceneDescriptorSetLayout{ VK_NULL_HANDLE };
+        VkDescriptorSetLayout fullScreenDescriptorSetLayout{ VK_NULL_HANDLE };
         VkDescriptorSetLayout skyboxDescriptorSetLayout{ VK_NULL_HANDLE };
         VkDescriptorSetLayout lightDescriptorSetLayout{ VK_NULL_HANDLE };
+    };
+
+    // Physical Based Bloom
+    struct BloomMip {
+        AllocatedImage image;
+        VkDescriptorImageInfo descriptor{};
+        VkExtent2D extent{};
+    };
+
+    struct BloomResrouces {
+        AllocatedImage hdrSceneColor;
+        VkDescriptorImageInfo hdrSceneDescriptor{};
+
+        std::vector<BloomMip> mips; // 多级mip，用于上下采样
+        VkSampler sampler = VK_NULL_HANDLE;
+
+        VkFormat hdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+        VkExtent2D sceneExtent{};
+        uint32_t mipCount = 5;
+    };
+
+    struct BloomDescriptorSetLayouts {
+        VkDescriptorSetLayout sampleDescriptorSetLayout{ VK_NULL_HANDLE };
+        VkDescriptorSetLayout compositeDescriptorSetLayout{ VK_NULL_HANDLE };
+    };
+
+    struct BloomDescriptorSets {
+        // 第 0 次下采样从 HDR scene 采样，单独保留一个 descriptor set 避免和 mip 索引混在一起。
+        VkDescriptorSet hdrSceneSet = VK_NULL_HANDLE;
+        // mipSets[i] 始终对应 bloom.mips[i]，上采样和最终合成时不会出现 off-by-one。
+        std::vector<VkDescriptorSet> mipSets;
+        // 最终合成同时读取原 HDR scene 和第一层 bloom mip。
+        VkDescriptorSet compositeSet = VK_NULL_HANDLE;
+    };
+
+    struct BloomPipelinesLayout {
+        VkPipelineLayout bloomDownsamplePipelineLayout{ VK_NULL_HANDLE };
+        VkPipelineLayout bloomUpsamplePipelineLayout{ VK_NULL_HANDLE };
+        VkPipelineLayout bloomCompositePipelineLayout{ VK_NULL_HANDLE };
+    };
+
+    struct BloomPipelines {
+        VkPipeline bloomDownsamplePipeline{ VK_NULL_HANDLE };
+        VkPipeline bloomUpsamplePipeline{ VK_NULL_HANDLE };
+        VkPipeline bloomCompositePipeline{ VK_NULL_HANDLE };
     };
 
 public:
@@ -164,6 +213,18 @@ public:
 
     // 光源
     vkglTF::Model lightObject;
+
+    // Physical Based Bloom
+    BloomResrouces bloom;
+    BloomDescriptorSetLayouts bloomDescriptorSetLayouts;
+    BloomDescriptorSets bloomDescriptorSets;
+    BloomPipelinesLayout bloomPipelinesLayout;
+    BloomPipelines bloomPipelines;
+    int enableBloom = 1;
+    float exposure = 1.0f;
+    float bloomStrength = 1.0f;
+    float bloomFilterRadius = 1.0f;
+    int bloomMipCount = 5;
     
 public:
     VulkanExample();
@@ -172,6 +233,8 @@ public:
     void createVmaAllocator();
     void loadAssets();
     void createDescriptorsPool();
+    void createBloomResources();
+    void createBloomDescriptorSets();
     void createUniformBuffers();
     void setupDescriptors();
     void createPipelines();
@@ -179,17 +242,23 @@ public:
     void destroyPipelines();
     void destroyDescriptors();
     void destroyUniformBuffers();
+    void destroyBloomDescriptorSets();
+    void destroyBloomResources();
     void destroyAssets();
     void destroyVmaAllocator();
 
     void createScenePipelineLayout();
     void createScenePipeline();
+    void createFullScreenPipelineLayout();
+    void createFullScreenPipeline();
     void createPBRTexturePipelineLayout();
     void createPBRTexturePipeline();
     void createSkyboxPipelineLayout();
     void createSkyboxPipeline();
     void createLightPipelineLayout();
     void createLightPipeline();
+    void createBloomPipelinesLayout();
+    void createBloomPipelines();
 
     void generateIrradianceCubeMap();
     void generatePrefilteredCubeMap();
@@ -206,6 +275,10 @@ public:
     void cmdDrawPBRTexture(VkCommandBuffer cmd);
     void cmdDrawLight(VkCommandBuffer cmd);
     void cmdDrawSkybox(VkCommandBuffer cmd);
+    void cmdDrawBloomDownsample(VkCommandBuffer cmd);
+    void cmdDrawBloomUpsample(VkCommandBuffer cmd);
+    void cmdDrawBloomComposite(VkCommandBuffer cmd);
+    void cmdDrawFullScreen(VkCommandBuffer cmd);
 
 private:
     const std::string filterCubeVertexShader = "lab2/fliterCube.vert.spv";
@@ -218,6 +291,9 @@ private:
     const std::string pbrSceneVertexShader = "lab2/pbrScene.vert.spv";
     const std::string pbrSceneFragmentShader = "lab2/pbrScene.frag.spv";
 
+    const std::string fullScreenVertexShader = "lab2/fullscreen.vert.spv";
+    const std::string fullScreenFragmentShader = "lab2/fullscreen.frag.spv";
+
     const std::string pbrModelPath = "models/DamagedHelmet/DamagedHelmet.gltf";
     const std::string pbrTextureVertexShader = "lab2/pbrTexture.vert.spv";
     const std::string pbrTextureFragmentShader = "lab2/pbrTexture.frag.spv";
@@ -227,6 +303,15 @@ private:
 
     const std::string skyboxVertexShader = "lab2/skybox.vert.spv";
     const std::string skyboxFragmentShader = "lab2/skybox.frag.spv";
+
+    const std::string bloomDownsampleVertexShader = fullScreenVertexShader;
+    const std::string bloomDownsampleFragmentShader = "lab2/downSample.frag.spv";
+
+    const std::string bloomUpsampleVertexShader = fullScreenVertexShader;
+    const std::string bloomUpsampleFragmentShader = "lab2/upSample.frag.spv";
+
+    const std::string bloomCompositeVertexShader = fullScreenVertexShader;
+    const std::string bloomCompositeFragmentShader = "lab2/composite.frag.spv";
 
     const std::string hdrFilePath = "textures/hdr/church.ktx";
 };

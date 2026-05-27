@@ -12,8 +12,6 @@ SamplerState skyboxSampler : register(s1, space0);
 FSOutput main(FSInput input) {
     FSOutput output;
     float3 color = skyboxTexture.Sample(skyboxSampler, input.uvw).xyz;
-    color = color / (color + 1.0f); // Reinhard tone mapping
-    color = pow(color, 1.0f / 2.2f); // Gamma correction
     output.color = float4(color, 1.0f);
     return output;
 }
