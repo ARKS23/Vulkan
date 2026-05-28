@@ -13,7 +13,12 @@ A comprehensive collection of open source C++ examples for [Vulkan®](https://ww
 
 https://github.com/user-attachments/assets/c6d4ad54-c4fb-4a4c-b212-20ca4c8ed60c
 
-### Lab2 : PBR
+### Lab2 : PBR + Bloom
+- 展示
+
+https://github.com/user-attachments/assets/3c68b9dd-9acf-48ad-ae42-67719fdaac18
+
+
 
 
 
