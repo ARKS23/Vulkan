@@ -311,6 +311,9 @@ namespace vkglTF
 		void bindBuffers(VkCommandBuffer commandBuffer);
 		void drawNode(Node* node, VkCommandBuffer commandBuffer, uint32_t renderFlags = 0, VkPipelineLayout pipelineLayout = VK_NULL_HANDLE, uint32_t bindImageSet = 1);
 		void draw(VkCommandBuffer commandBuffer, uint32_t renderFlags = 0, VkPipelineLayout pipelineLayout = VK_NULL_HANDLE, uint32_t bindImageSet = 1);
+		// 与 draw() 使用同一套 glTF node / primitive / material 遍历逻辑，但把 instanceCount 暴露给调用方。
+		void drawNodeInstanced(Node* node, VkCommandBuffer commandBuffer, uint32_t instanceCount, uint32_t firstInstance = 0, uint32_t renderFlags = 0, VkPipelineLayout pipelineLayout = VK_NULL_HANDLE, uint32_t bindImageSet = 1);
+		void drawInstanced(VkCommandBuffer commandBuffer, uint32_t instanceCount, uint32_t firstInstance = 0, uint32_t renderFlags = 0, VkPipelineLayout pipelineLayout = VK_NULL_HANDLE, uint32_t bindImageSet = 1);
 		void getNodeDimensions(Node* node, glm::vec3& min, glm::vec3& max);
 		void getSceneDimensions();
 		void updateAnimation(uint32_t index, float time);

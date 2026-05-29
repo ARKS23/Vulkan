@@ -21,7 +21,7 @@
 #include "vk_images.h"
 
 /*
- Lab2: PBR basic
+ Lab2: PBR basic + IBL + bloom
 */
 
 struct Material {

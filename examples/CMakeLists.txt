@@ -188,6 +188,7 @@ set(EXAMPLES
 	lab0
 	lab1
 	lab2
+	lab3
 )
 
 buildExamples()

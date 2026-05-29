@@ -1569,6 +1569,50 @@ void vkglTF::Model::draw(VkCommandBuffer commandBuffer, uint32_t renderFlags, Vk
 	}
 }
 
+void vkglTF::Model::drawNodeInstanced(Node *node, VkCommandBuffer commandBuffer, uint32_t instanceCount, uint32_t firstInstance, uint32_t renderFlags, VkPipelineLayout pipelineLayout, uint32_t bindImageSet)
+{
+	if (node->mesh) {
+		for (Primitive* primitive : node->mesh->primitives) {
+			bool skip = false;
+			const vkglTF::Material& material = primitive->material;
+			if (renderFlags & RenderFlags::RenderOpaqueNodes) {
+				skip = (material.alphaMode != Material::ALPHAMODE_OPAQUE);
+			}
+			if (renderFlags & RenderFlags::RenderAlphaMaskedNodes) {
+				skip = (material.alphaMode != Material::ALPHAMODE_MASK);
+			}
+			if (renderFlags & RenderFlags::RenderAlphaBlendedNodes) {
+				skip = (material.alphaMode != Material::ALPHAMODE_BLEND);
+			}
+			if (!skip) {
+				if (renderFlags & RenderFlags::BindImages) {
+					vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, bindImageSet, 1, &material.descriptorSet, 0, nullptr);
+				}
+				vkCmdDrawIndexed(commandBuffer, primitive->indexCount, instanceCount, primitive->firstIndex, 0, firstInstance);
+			}
+		}
+	}
+	for (auto& child : node->children) {
+		drawNodeInstanced(child, commandBuffer, instanceCount, firstInstance, renderFlags, pipelineLayout, bindImageSet);
+	}
+}
+
+void vkglTF::Model::drawInstanced(VkCommandBuffer commandBuffer, uint32_t instanceCount, uint32_t firstInstance, uint32_t renderFlags, VkPipelineLayout pipelineLayout, uint32_t bindImageSet)
+{
+	if (instanceCount == 0) {
+		return;
+	}
+
+	if (!buffersBound) {
+		const VkDeviceSize offsets[1] = {0};
+		vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertices.buffer, offsets);
+		vkCmdBindIndexBuffer(commandBuffer, indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+	}
+	for (auto& node : nodes) {
+		drawNodeInstanced(node, commandBuffer, instanceCount, firstInstance, renderFlags, pipelineLayout, bindImageSet);
+	}
+}
+
 void vkglTF::Model::getNodeDimensions(Node *node, glm::vec3 &min, glm::vec3 &max)
 {
 	if (node->mesh) {
