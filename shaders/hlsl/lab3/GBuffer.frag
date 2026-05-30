@@ -23,18 +23,6 @@ struct CameraUBO {
 };
 [[vk::binding(0, 0)]] ConstantBuffer<CameraUBO> cameraInfo : register(b0);
 
-struct Light {
-    float4 position;
-    float4 color;
-    float4 intensity;
-};
-
-struct LightUBO {
-    Light lights[4];
-    int4 lightCount;
-};
-[[vk::binding(1, 0)]] ConstantBuffer<LightUBO> lightInfo : register(b1);
-
 // PBR纹理资源
 Texture2D baseColorMap : register(t0, space1);
 SamplerState baseColorSampler : register(s0, space1);

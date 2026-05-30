@@ -96,6 +96,7 @@ for root, dirs, files in os.walk(dir_path):
                 '-fspv-extension=SPV_EXT_descriptor_indexing',
                 '-fspv-extension=SPV_KHR_ray_query',
                 '-fspv-extension=SPV_KHR_fragment_shading_rate',
+                '-I', dir_path,
                 additional_exts,
                 target,
                 hlsl_file,

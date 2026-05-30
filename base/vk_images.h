@@ -65,6 +65,15 @@ namespace vkutil {
 
     // 录入 buffer -> image 拷贝命令，面向单层、单 mip 的 2D color image。
     // 调用前目标 image 必须已经处于 TRANSFER_DST_OPTIMAL layout。
+    // 使用 AllocatedImage::layout 作为 oldLayout，并在录制 barrier 后更新它。
+    // 适合单 mip、单 layer 的普通 render target，如 G-Buffer / HDR / SSAO。
+    bool cmdTransitionTrackedImageLayout(
+        VkCommandBuffer cmd,
+        AllocatedImage& image,
+        VkImageLayout newLayout,
+        VkImageAspectFlags aspectMask
+    );
+
     void cmdCopyBufferToImage(
         VkCommandBuffer cmd,
         VkBuffer buffer,

@@ -294,6 +294,21 @@ namespace vkutil {
         vkCmdPipelineBarrier2(cmd, &dependencyInfo);
     }
     
+    bool cmdTransitionTrackedImageLayout(
+            VkCommandBuffer cmd,
+            AllocatedImage& image,
+            VkImageLayout newLayout,
+            VkImageAspectFlags aspectMask)
+    {
+        if (image.image == VK_NULL_HANDLE || image.layout == newLayout) {
+            return false;
+        }
+
+        cmdTransitionImageLayout(cmd, image.image, image.layout, newLayout, aspectMask);
+        image.layout = newLayout;
+        return true;
+    }
+    
     void cmdCopyBufferToImage(VkCommandBuffer cmd,
             VkBuffer buffer,
             VkImage image,

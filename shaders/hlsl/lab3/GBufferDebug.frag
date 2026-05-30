@@ -1,3 +1,5 @@
+#include "common/Color.hlsli"
+
 struct FSInput {
     [[vk::location(0)]] float2 uv : TEXCOORD0;
 };
@@ -26,10 +28,19 @@ SamplerState emissiveAOSampler : register(s2);
 Texture2D depthMap : register(t3);
 SamplerState depthMapSampler : register(s3);
 
+Texture2D sceneColor : register(t4);
+SamplerState sceneColorSampler : register(s4);
+
 float3 debugColor(FSInput input) {
     float3 color = float3(0.xxx);
+    // final composite
+    if (pushConstants.debugView == 0) {
+        color = sceneColor.Sample(sceneColorSampler, input.uv).rgb;
+        color = ACESFilm(color);
+        color = LinearToSRGB(color);
+    }
     // Albedo
-    if (pushConstants.debugView == 1) {
+    else if (pushConstants.debugView == 1) {
         color = albedoMetallic.Sample(albedoMetallicSampler, input.uv).rgb;
     }
     // Normal

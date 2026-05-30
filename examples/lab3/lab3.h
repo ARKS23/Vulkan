@@ -260,7 +260,6 @@ private:
     void cmdDrawComposite(VkCommandBuffer cmd);
     void cmdDrawClearOnly(VkCommandBuffer cmd);
 
-    void transitionAttachmentLayout(RenderAttachment& attachment, VkCommandBuffer cmd, VkImageLayout newLayout, VkImageAspectFlags aspectMask);
     void transitionGBufferForWriting(VkCommandBuffer cmd);
     void transitionGBufferForSampling(VkCommandBuffer cmd);
 
@@ -273,6 +272,9 @@ private:
     const std::string gBufferFragmentShader = "lab3/GBuffer.frag.spv";
     const std::string gBufferInstancedVertexShader = "lab3/gbuffer_instanced.vert.spv";
 
+    const std::string deferredLightingVertexShader = "lab3/fullscreen.vert.spv";
+    const std::string deferredLightingFragmentShader = "lab3/deferredLighting.frag.spv";
+
     const std::string gBufferDebugVertexShader = "lab3/fullscreen.vert.spv";
     const std::string gBufferDebugFragmentShader = "lab3/GBufferDebug.frag.spv";
 
@@ -282,6 +284,5 @@ private:
     const std::string ssaoFragmentShader = "lab3/ssao.frag.spv";
     const std::string ssaoBlurFragmentShader = "lab3/ssaoBlur.frag.spv";
 
-    const std::string deferredLightingFragmentShader = "lab3/deferredLighting.frag.spv";
     const std::string compositeFragmentShader = "lab3/composite.frag.spv";
 };
