@@ -40,6 +40,7 @@ public:
     static constexpr uint32_t kSSAOSize = 64;
     static constexpr uint32_t kSSAONoiseDim = 4;
     static constexpr uint32_t kMaxInstanceCount = 1024;
+    static constexpr uint32_t kMaxLightCount = 150;
 
     struct CameraUBO {
         glm::mat4 projection{1.0f};
@@ -57,8 +58,8 @@ public:
     };
 
     struct LightsUBO {
-        Light lights[4];
-        glm::ivec4 lightCount{4, 0, 0, 0};
+        Light lights[kMaxLightCount];
+        glm::ivec4 lightCount{static_cast<int32_t>(kMaxLightCount), 0, 0, 0};
     };
 
     struct SSAOParamsUBO {
@@ -167,6 +168,8 @@ public:
         int32_t enableInstancing{1};
         int32_t enableBloom{0};
         int32_t instanceCount{128};
+        int32_t lightCount{static_cast<int32_t>(kMaxLightCount)};
+        float lightIntensity{25.0f};
         float exposure{1.0f};
     };
 
@@ -249,6 +252,7 @@ private:
     void destroyPipelines();
 
     void updateUniformBuffers();
+    void updateLights();
     void buildCommandBuffer();
 
     // 后续逐步把这些空 pass 填成真正的 Lab3 渲染链路。

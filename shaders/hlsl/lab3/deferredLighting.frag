@@ -1,5 +1,7 @@
 #include "common/PBR.hlsli"
 
+static const int MAX_LIGHT_COUNT = 150;
+
 struct FSInput {
     [[vk::location(0)]] float2 uv : TEXCOORD0;
 };
@@ -39,7 +41,7 @@ struct Light {
 };
 
 struct LightsUBO {
-    Light lights[4];
+    Light lights[MAX_LIGHT_COUNT];
     int4 lightCount;
 };
 ConstantBuffer<LightsUBO> lightsInfo : register(b6);
@@ -54,11 +56,11 @@ float3 reconstructWorldPosition(float2 uv, float depth, float4x4 inverseProjecti
 
     // 逆变换回世界坐标
     float4 viewPos = mul(inverseProjection, clipPos);
+    viewPos /= viewPos.w;
     float4 worldPosition = mul(inverseView, viewPos);
 
     // 透视除法
-    worldPosition.xyz /= worldPosition.z;
-    worldPosition.z = 1.0f;
+    worldPosition /= worldPosition.w;
 
     return worldPosition.xyz;
 }
@@ -83,7 +85,8 @@ FSOutput main(FSInput input) {
 
     // PBR直接光照
     float3 Lo = float3(0.0f, 0.0f, 0.0f);
-    for (int i = 0; i < lightsInfo.lightCount.x; ++i) {
+    const int lightCount = min(lightsInfo.lightCount.x, MAX_LIGHT_COUNT);
+    for (int i = 0; i < lightCount; ++i) {
         Light light = lightsInfo.lights[i];
         float3 L = normalize(light.position.xyz - worldPos);
         float3 V = normalize(cameraInfo.cameraPos.xyz - worldPos);

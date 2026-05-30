@@ -630,6 +630,56 @@ void VulkanExample::destroyPipelines() {
     }
 }
 
+void VulkanExample::updateLights() {
+    renderSettings.lightCount = glm::clamp(
+        renderSettings.lightCount,
+        1,
+        static_cast<int32_t>(kMaxLightCount)
+    );
+
+    lightsUBO.lightCount = glm::ivec4(renderSettings.lightCount, 0, 0, 0);
+
+    const float goldenAngle = 2.39996323f;
+    const float maxRadius = 34.0f;
+    const uint32_t activeLightCount = static_cast<uint32_t>(renderSettings.lightCount);
+
+    for (uint32_t i = 0; i < kMaxLightCount; ++i) {
+        Light& light = lightsUBO.lights[i];
+
+        if (i >= activeLightCount) {
+            light.position = glm::vec4(0.0f);
+            light.color = glm::vec4(0.0f);
+            light.intensity = glm::vec4(0.0f);
+            continue;
+        }
+
+        const float t = (static_cast<float>(i) + 0.5f) / static_cast<float>(activeLightCount);
+        const float angle = static_cast<float>(i) * goldenAngle;
+        const float radius = maxRadius * std::sqrt(t);
+        const float height = 2.0f + 3.5f * (0.5f + 0.5f * std::sin(static_cast<float>(i) * 0.73f));
+
+        const glm::vec3 position(
+            std::cos(angle) * radius,
+            height,
+            std::sin(angle) * radius
+        );
+
+        glm::vec3 color(
+            0.5f + 0.5f * std::sin(static_cast<float>(i) * 0.37f + 0.0f),
+            0.5f + 0.5f * std::sin(static_cast<float>(i) * 0.61f + 2.0f),
+            0.5f + 0.5f * std::sin(static_cast<float>(i) * 0.83f + 4.0f)
+        );
+        color = glm::mix(color, glm::vec3(1.0f), 0.18f);
+
+        const float variation = 0.75f + 0.5f * (static_cast<float>(i % 7) / 6.0f);
+        const float intensity = renderSettings.lightIntensity * variation;
+
+        light.position = glm::vec4(position, 1.0f);
+        light.color = glm::vec4(color, 1.0f);
+        light.intensity = glm::vec4(intensity, 0.0f, 0.0f, 0.0f);
+    }
+}
+
 void VulkanExample::updateUniformBuffers() {
     cameraUBO.projection = camera.matrices.perspective;
     cameraUBO.view = camera.matrices.view;
@@ -643,20 +693,7 @@ void VulkanExample::updateUniformBuffers() {
         1.0f / static_cast<float>(std::max(1u, height))
     );
 
-    const float p = 8.0f;
-    lightsUBO.lightCount = glm::ivec4(4, 0, 0, 0);
-    lightsUBO.lights[0].position = glm::vec4(-p, 3.0f, -p, 1.0f);
-    lightsUBO.lights[1].position = glm::vec4( p, 3.0f, -p, 1.0f);
-    lightsUBO.lights[2].position = glm::vec4(-p, 3.0f,  p, 1.0f);
-    lightsUBO.lights[3].position = glm::vec4( p, 3.0f,  p, 1.0f);
-
-    lightsUBO.lights[0].color = glm::vec4(1.0f, 0.55f, 0.35f, 1.0f);
-    lightsUBO.lights[1].color = glm::vec4(0.25f, 0.65f, 1.0f, 1.0f);
-    lightsUBO.lights[2].color = glm::vec4(0.55f, 1.0f, 0.45f, 1.0f);
-    lightsUBO.lights[3].color = glm::vec4(1.0f, 0.85f, 0.35f, 1.0f);
-    for (Light& light : lightsUBO.lights) {
-        light.intensity = glm::vec4(18.0f, 18.0f, 18.0f, 1.0f);
-    }
+    updateLights();
 
     renderSettings.instanceCount = glm::clamp(renderSettings.instanceCount, 1, static_cast<int32_t>(kMaxInstanceCount));
 
@@ -951,9 +988,11 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay) {
         overlay->comboBox("Debug View", &renderSettings.debugView, debugViewNames);
         overlay->checkBox("SSAO", &renderSettings.enableSSAO);
         overlay->checkBox("SSAO Blur", &renderSettings.enableSSAOBlur);
-        overlay->checkBox("Instancing", &renderSettings.enableInstancing);
+        //overlay->checkBox("Instancing", &renderSettings.enableInstancing);
         overlay->checkBox("Bloom", &renderSettings.enableBloom);
         overlay->sliderInt("Instances", &renderSettings.instanceCount, 1, static_cast<int32_t>(kMaxInstanceCount));
+        overlay->sliderInt("Lights", &renderSettings.lightCount, 1, static_cast<int32_t>(kMaxLightCount));
+        overlay->sliderFloat("Light Intensity", &renderSettings.lightIntensity, 1.0f, 80.0f);
         overlay->sliderFloat("Exposure", &renderSettings.exposure, 0.1f, 5.0f);
     }
 
