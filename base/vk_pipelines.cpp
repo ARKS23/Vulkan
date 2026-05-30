@@ -97,8 +97,16 @@ namespace vkutil {
         VkPipelineColorBlendStateCreateInfo colorBlendState{};
         colorBlendState.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
         colorBlendState.logicOpEnable = VK_FALSE;
-        colorBlendState.attachmentCount = 1;
-        colorBlendState.pAttachments = &colorBlendAttachment;
+
+        // Dynamic Rendering 的 MRT 数量由 colorAttachmentFormats 决定。
+        // blend attachment 数量必须和 colorAttachmentCount 一致，否则只有第一个 RT 的状态是完整的，
+        // G-Buffer 这类多目标输出会导致后续 RT 保持 clear value 或触发验证层错误。
+        std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments(
+            colorAttachmentFormats.size(),
+            colorBlendAttachment
+        );
+        colorBlendState.attachmentCount = static_cast<uint32_t>(colorBlendAttachments.size());
+        colorBlendState.pAttachments = colorBlendAttachments.empty() ? nullptr : colorBlendAttachments.data();
 
         renderingInfo.colorAttachmentCount = static_cast<uint32_t>(colorAttachmentFormats.size());
         renderingInfo.pColorAttachmentFormats = colorAttachmentFormats.empty() ? nullptr : colorAttachmentFormats.data();

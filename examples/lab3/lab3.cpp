@@ -117,11 +117,25 @@ void VulkanExample::destroySamplers() {
 }
 
 void VulkanExample::loadAssets() {
-    // Lab3 第一阶段先搭管线骨架，模型资源等 G-Buffer shader 写好后再接入。
+    // G-Buffer 正式版直接复用 glTF PBR 贴图：baseColor / metallicRoughness / normal / occlusion / emissive。
+    // 后续调用 drawInstanced(... BindImages ..., bindImageSet = 1) 时，每个 primitive 会绑定自己的材质贴图 descriptor。
+    vkglTF::descriptorBindingFlags =
+        vkglTF::DescriptorBindingFlags::ImageBaseColor |
+        vkglTF::DescriptorBindingFlags::ImageMetallicRoughness |
+        vkglTF::DescriptorBindingFlags::ImageNormalMap |
+        vkglTF::DescriptorBindingFlags::ImageOcclusionMap |
+        vkglTF::DescriptorBindingFlags::ImageEmissiveMap;
+
+    sceneModel.loadFromFile(
+        getAssetPath() + pbrModelPath,
+        vulkanDevice,
+        queue,
+        vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY
+    );
 }
 
 void VulkanExample::destroyAssets() {
-    // 当前还没有加载 glTF / texture 资源，后续接入模型后在这里统一释放。
+    // vkglTF::Model 由成员析构函数释放；这里保留入口，后续如果接入额外纹理/模型可集中处理。
 }
 
 VulkanExample::RenderAttachment VulkanExample::createColorAttachment(VkExtent2D extent, VkFormat format) {
@@ -305,7 +319,8 @@ void VulkanExample::updateInstanceBuffer() {
         instance.model = model;
         instance.normalMatrix = glm::mat4(glm::inverseTranspose(glm::mat3(model)));
         instance.color = glm::vec4(1.0f, 0.78f, 0.35f, 1.0f);
-        instance.materialParams = glm::vec4(metallic, roughness, 0.0f, 0.0f);
+        // 正式 PBR 参数来自 glTF 贴图；这里的 x/y 作为可选 per-instance 调制系数保留。
+        instance.materialParams = glm::vec4(metallic, roughness, 1.0f, 0.0f);
     }
 }
 
@@ -352,7 +367,7 @@ void VulkanExample::createDescriptorPool() {
         vkutil::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxConcurrentFrames * 24)
     };
 
-    VkDescriptorPoolCreateInfo poolCI = vkutil::descriptorPoolCreateInfo(poolSizes, maxConcurrentFrames * 8);
+    VkDescriptorPoolCreateInfo poolCI = vkutil::descriptorPoolCreateInfo(poolSizes, maxConcurrentFrames * 9);
     VK_CHECK_RESULT(vkCreateDescriptorPool(device, &poolCI, nullptr, &descriptorPool));
 }
 
@@ -370,6 +385,15 @@ void VulkanExample::createDescriptorSetLayouts() {
     };
     VkDescriptorSetLayoutCreateInfo sceneLayoutCI = vkutil::descriptorSetLayoutCreateInfo(sceneBindings);
     VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &sceneLayoutCI, nullptr, &descriptorSetLayouts.scene));
+
+    std::vector<VkDescriptorSetLayoutBinding> gBufferDebugBindings = {
+        vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 0), // albedo + metallic
+        vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1), // normal + roughness
+        vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 2), // emissive + material AO
+        vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 3)  // depth
+    };
+    VkDescriptorSetLayoutCreateInfo gBufferDebugLayoutCI = vkutil::descriptorSetLayoutCreateInfo(gBufferDebugBindings);
+    VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &gBufferDebugLayoutCI, nullptr, &descriptorSetLayouts.gBufferDebug));
 
     std::vector<VkDescriptorSetLayoutBinding> ssaoBindings = {
         vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 0), // depth
@@ -413,6 +437,9 @@ void VulkanExample::allocateDescriptorSets() {
         VkDescriptorSetAllocateInfo allocInfo = vkutil::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.scene, 1);
         VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &sets.scene));
 
+        allocInfo = vkutil::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.gBufferDebug, 1);
+        VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &sets.gBufferDebug));
+
         allocInfo = vkutil::descriptorSetAllocateInfo(descriptorPool, &descriptorSetLayouts.ssao, 1);
         VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &sets.ssao));
 
@@ -442,6 +469,14 @@ void VulkanExample::updateDescriptorSets() {
             vkutil::writeBufferDescriptorSet(descriptorSets[i].scene, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2, &instanceInfo)
         };
         vkutil::updateDescriptorSet(device, sceneWrites);
+
+        std::vector<VkWriteDescriptorSet> gBufferDebugWrites = {
+            vkutil::writeCombinedImageSampler(descriptorSets[i].gBufferDebug, 0, &gBuffer.albedoMetallic.descriptor),
+            vkutil::writeCombinedImageSampler(descriptorSets[i].gBufferDebug, 1, &gBuffer.normalRoughness.descriptor),
+            vkutil::writeCombinedImageSampler(descriptorSets[i].gBufferDebug, 2, &gBuffer.emissiveAO.descriptor),
+            vkutil::writeCombinedImageSampler(descriptorSets[i].gBufferDebug, 3, &gBuffer.depth.descriptor)
+        };
+        vkutil::updateDescriptorSet(device, gBufferDebugWrites);
 
         std::vector<VkWriteDescriptorSet> ssaoWrites = {
             vkutil::writeCombinedImageSampler(descriptorSets[i].ssao, 0, &gBuffer.depth.descriptor),
@@ -486,6 +521,7 @@ void VulkanExample::destroyDescriptors() {
     };
 
     destroyLayout(descriptorSetLayouts.scene);
+    destroyLayout(descriptorSetLayouts.gBufferDebug);
     destroyLayout(descriptorSetLayouts.ssao);
     destroyLayout(descriptorSetLayouts.ssaoBlur);
     destroyLayout(descriptorSetLayouts.deferredLighting);
@@ -494,19 +530,62 @@ void VulkanExample::destroyDescriptors() {
 
 void VulkanExample::createPipelines() {
     // 这里只先创建 pipeline layout，让后续填 shader/pipeline 时接口已经固定。
-    pipelineLayouts.gBuffer = vkutil::createPipelineLayout(device, {descriptorSetLayouts.scene});
+    pipelineLayouts.gBuffer = vkutil::createPipelineLayout(device, {descriptorSetLayouts.scene, vkglTF::descriptorSetLayoutImage});
+    VkPushConstantRange gBufferDebugPushConstant{};
+    gBufferDebugPushConstant.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    gBufferDebugPushConstant.offset = 0;
+    gBufferDebugPushConstant.size = sizeof(GBufferDebugPushConstants);
+    pipelineLayouts.gBufferDebug = vkutil::createPipelineLayout(
+        device,
+        {descriptorSetLayouts.gBufferDebug},
+        {gBufferDebugPushConstant}
+    );
+
     pipelineLayouts.ssao = vkutil::createPipelineLayout(device, {descriptorSetLayouts.ssao});
     pipelineLayouts.ssaoBlur = vkutil::createPipelineLayout(device, {descriptorSetLayouts.ssaoBlur});
     pipelineLayouts.deferredLighting = vkutil::createPipelineLayout(device, {descriptorSetLayouts.deferredLighting});
     pipelineLayouts.composite = vkutil::createPipelineLayout(device, {descriptorSetLayouts.composite});
 
     // TODO(Lab3): shader 写好后在这里创建 gBuffer / SSAO / deferred lighting / composite pipelines。
+    // G-Buffer pipeline
+    // G-Buffer 管线：写入 MRT，set 0 读取相机/灯光/实例数据，set 1 由 glTF primitive 绑定材质贴图。
+    vkutil::PipelineBuilder gBufferBuilder;
+    gBufferBuilder.setPipelineLayout(pipelineLayouts.gBuffer)
+        .setShaders(
+            loadShader(getShadersPath() + gBufferVertexShader, VK_SHADER_STAGE_VERTEX_BIT),
+            loadShader(getShadersPath() + gBufferFragmentShader, VK_SHADER_STAGE_FRAGMENT_BIT))
+        .setVertexInput(*vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position, vkglTF::VertexComponent::Normal, vkglTF::VertexComponent::UV, vkglTF::VertexComponent::Tangent, vkglTF::VertexComponent::Color }))
+        .setColorAttachmentFormats({gBuffer.albedoMetallicFormat, gBuffer.normalRoughnessFormat, gBuffer.emissiveAOFormat})
+        .setDepthFormat(gBuffer.depthAttachmentFormat)
+        .enableDepthTest(true, VK_COMPARE_OP_LESS_OR_EQUAL)
+        .setCullMode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE)
+        .disableBlending();
+    pipelines.gBufferInstanced = gBufferBuilder.build(device, pipelineCache);
+
+    // G-Buffer Debug 管线：只负责把某一项 G-Buffer 可视化到 swapchain，避免污染正式 deferred lighting。
+    // 如果 fragment shader 还没写好，先保持空句柄，cmdDrawGBufferDebug 会退回到清屏 pass。
+    const std::string fullscreenVertexPath = getShadersPath() + gBufferDebugVertexShader;
+    const std::string gBufferDebugFragmentPath = getShadersPath() + gBufferDebugFragmentShader;
+    if (vks::tools::fileExists(fullscreenVertexPath) && vks::tools::fileExists(gBufferDebugFragmentPath)) {
+        vkutil::PipelineBuilder gBufferDebugBuilder;
+        gBufferDebugBuilder.setPipelineLayout(pipelineLayouts.gBufferDebug)
+            .setShaders(
+                loadShader(fullscreenVertexPath, VK_SHADER_STAGE_VERTEX_BIT),
+                loadShader(gBufferDebugFragmentPath, VK_SHADER_STAGE_FRAGMENT_BIT))
+            .setEmptyVertexInput()
+            .setColorAttachmentFormat(swapChain.colorFormat)
+            .disableDepthTest()
+            .setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
+            .disableBlending();
+        pipelines.gBufferDebug = gBufferDebugBuilder.build(device, pipelineCache);
+    }
 }
 
 void VulkanExample::destroyPipelines() {
-    std::array<VkPipeline*, 6> pipelineHandles = {
+    std::array<VkPipeline*, 7> pipelineHandles = {
         &pipelines.gBuffer,
         &pipelines.gBufferInstanced,
+        &pipelines.gBufferDebug,
         &pipelines.ssao,
         &pipelines.ssaoBlur,
         &pipelines.deferredLighting,
@@ -519,8 +598,9 @@ void VulkanExample::destroyPipelines() {
         }
     }
 
-    std::array<VkPipelineLayout*, 5> layoutHandles = {
+    std::array<VkPipelineLayout*, 6> layoutHandles = {
         &pipelineLayouts.gBuffer,
+        &pipelineLayouts.gBufferDebug,
         &pipelineLayouts.ssao,
         &pipelineLayouts.ssaoBlur,
         &pipelineLayouts.deferredLighting,
@@ -609,14 +689,166 @@ void VulkanExample::buildCommandBuffer() {
 
     // 现在 pipeline 还没接入，先提供一个稳定的可运行清屏 pass。
     // 后续会替换成：GBuffer -> SSAO -> SSAOBlur -> DeferredLighting -> Composite。
-    cmdDrawClearOnly(commandBuffer);
+    // 先生成 G-Buffer，再根据 Debug View 决定是直接可视化 G-Buffer，还是走后续正式渲染链路。
+    transitionGBufferForWriting(commandBuffer);
+    cmdDrawGBuffer(commandBuffer);
+    transitionGBufferForSampling(commandBuffer);
+
+    cmdDrawGBufferDebug(commandBuffer);
 
     VK_CHECK_RESULT(vkEndCommandBuffer(commandBuffer));
 }
 
+void VulkanExample::transitionAttachmentLayout(RenderAttachment& attachment, VkCommandBuffer cmd, VkImageLayout newLayout, VkImageAspectFlags aspectMask) {
+    if (attachment.image.image == VK_NULL_HANDLE || attachment.image.layout == newLayout) {
+        return;
+    }
+
+    vkutil::cmdTransitionImageLayout(cmd, attachment.image.image, attachment.image.layout, newLayout, aspectMask);
+    attachment.image.layout = newLayout;
+}
+
+void VulkanExample::transitionGBufferForWriting(VkCommandBuffer cmd) {
+    // 每帧都会重写 G-Buffer，写入前把颜色附件和深度附件切到 attachment layout。
+    transitionAttachmentLayout(gBuffer.albedoMetallic, cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+    transitionAttachmentLayout(gBuffer.normalRoughness, cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+    transitionAttachmentLayout(gBuffer.emissiveAO, cmd, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+    transitionAttachmentLayout(gBuffer.depth, cmd, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
+}
+
+void VulkanExample::transitionGBufferForSampling(VkCommandBuffer cmd) {
+    // G-Buffer pass 结束后，后续 Debug/SSAO/Deferred pass 都会以纹理方式读取这些结果。
+    transitionAttachmentLayout(gBuffer.albedoMetallic, cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+    transitionAttachmentLayout(gBuffer.normalRoughness, cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+    transitionAttachmentLayout(gBuffer.emissiveAO, cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+    transitionAttachmentLayout(gBuffer.depth, cmd, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
+}
+
 void VulkanExample::cmdDrawGBuffer(VkCommandBuffer cmd) {
-    (void)cmd;
-    // TODO(Lab3): 写入 albedo/metallic、normal/roughness、emissive/AO 和 depth。
+    // 正式版 G-Buffer：几何/实例数据来自 set 0，glTF 材质贴图来自 set 1。
+    // 当前 pipeline 还未创建时保持 no-op，方便先分阶段写 shader/pipeline。
+    if (pipelines.gBufferInstanced == VK_NULL_HANDLE) {
+        return;
+    }
+
+    std::array<VkRenderingAttachmentInfo, 3> colorAttachments = {
+        vkutil::renderingAttachmentInfo(
+            gBuffer.albedoMetallic.image.imageView,
+            VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+            VkClearValue{{0.0f, 0.0f, 0.0f, 1.0f}}
+        ),
+        vkutil::renderingAttachmentInfo(
+            gBuffer.normalRoughness.image.imageView,
+            VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+            VkClearValue{{0.5f, 0.5f, 1.0f, 1.0f}}
+        ),
+        vkutil::renderingAttachmentInfo(
+            gBuffer.emissiveAO.image.imageView,
+            VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+            VkClearValue{{0.0f, 0.0f, 0.0f, 1.0f}}
+        )
+    };
+
+    VkRenderingAttachmentInfo depthAttachment = vkutil::renderingdepthAttachmentInfo(
+        gBuffer.depth.image.imageView,
+        VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+        1.0f
+    );
+
+    VkRenderingInfo renderingInfo{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    renderingInfo.renderArea = {{0, 0}, gBuffer.extent};
+    renderingInfo.layerCount = 1;
+    renderingInfo.colorAttachmentCount = static_cast<uint32_t>(colorAttachments.size());
+    renderingInfo.pColorAttachments = colorAttachments.data();
+    renderingInfo.pDepthAttachment = &depthAttachment;
+
+    vkCmdBeginRendering(cmd, &renderingInfo);
+    {
+        vkutil::cmdSetViewportAndScissor(cmd, gBuffer.extent.width, gBuffer.extent.height);
+
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.gBufferInstanced);
+        vkCmdBindDescriptorSets(
+            cmd,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            pipelineLayouts.gBuffer,
+            0,
+            1,
+            &descriptorSets[currentBuffer].scene,
+            0,
+            nullptr
+        );
+
+        sceneModel.drawInstanced(
+            cmd,
+            static_cast<uint32_t>(renderSettings.instanceCount),
+            0,
+            vkglTF::RenderFlags::BindImages,
+            pipelineLayouts.gBuffer,
+            1
+        );
+    }
+    vkCmdEndRendering(cmd);
+}
+
+void VulkanExample::cmdDrawGBufferDebug(VkCommandBuffer cmd) {
+    vkutil::cmdTransitionImageLayout(
+        cmd,
+        swapChain.images[currentImageIndex],
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT
+    );
+
+    VkClearValue clearColor{};
+    clearColor.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+    VkRenderingAttachmentInfo colorAttachment = vkutil::renderingAttachmentInfo(
+        swapChain.imageViews[currentImageIndex],
+        VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        clearColor
+    );
+
+    vkutil::cmdBeginColorOnlyRendering(cmd, VkExtent2D{width, height}, colorAttachment);
+    {
+        vkutil::cmdSetViewportAndScissor(cmd, width, height);
+
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.gBufferDebug);
+        vkCmdBindDescriptorSets(
+            cmd,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            pipelineLayouts.gBufferDebug,
+            0,
+            1,
+            &descriptorSets[currentBuffer].gBufferDebug,
+            0,
+            nullptr
+        );
+
+        GBufferDebugPushConstants pushConstants{};
+        pushConstants.debugView = renderSettings.debugView;
+        pushConstants.nearPlane = camera.getNearClip();
+        pushConstants.farPlane = camera.getFarClip();
+        vkCmdPushConstants(
+            cmd,
+            pipelineLayouts.gBufferDebug,
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            sizeof(GBufferDebugPushConstants),
+            &pushConstants
+        );
+
+        // fullscreen.vert 使用 gl_VertexIndex/SV_VertexID 生成一个覆盖全屏的大三角形。
+        vkCmdDraw(cmd, 3, 1, 0, 0);
+        drawUI(cmd);
+    }
+    vkutil::cmdEndRendering(cmd);
+
+    vkutil::cmdTransitionImageLayout(
+        cmd,
+        swapChain.images[currentImageIndex],
+        VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        VK_IMAGE_ASPECT_COLOR_BIT
+    );
 }
 
 void VulkanExample::cmdDrawSSAO(VkCommandBuffer cmd) {

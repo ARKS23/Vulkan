@@ -47,7 +47,7 @@ public:
         glm::mat4 inverseProjection{1.0f};
         glm::mat4 inverseView{1.0f};
         glm::vec4 cameraPos{0.0f};
-        glm::vec4 screenSize{0.0f}; // x/y: 分辨率, z/w: 1 / 分辨率
+        glm::vec4 screenSize{0.0f}; // x:width, y:height, z:1/width, w:1/height
     };
 
     struct Light {
@@ -72,7 +72,8 @@ public:
         glm::mat4 model{1.0f};
         glm::mat4 normalMatrix{1.0f};
         glm::vec4 color{1.0f};
-        glm::vec4 materialParams{0.0f, 0.5f, 0.0f, 0.0f}; // metallic, roughness, emissiveStrength, materialIndex
+        // 正式 PBR 材质来自 glTF 贴图；这里保留为每实例调制参数/扩展位。
+        glm::vec4 materialParams{1.0f, 1.0f, 1.0f, 0.0f}; // metallicMul, roughnessMul, emissiveMul, materialIndex/unused
     };
 
     struct FrameUniformBuffers {
@@ -99,6 +100,13 @@ public:
         VkExtent2D extent{};
     };
 
+    struct GBufferDebugPushConstants {
+        int32_t debugView{0};
+        float nearPlane{0.1f};
+        float farPlane{256.0f};
+        float padding{0.0f}; // 对齐到 16 字节，方便 shader 端按 push constant 读取。
+    };
+
     struct SSAOResources {
         RenderAttachment raw;
         RenderAttachment blurred;
@@ -117,6 +125,7 @@ public:
 
     struct DescriptorSetLayouts {
         VkDescriptorSetLayout scene{VK_NULL_HANDLE};
+        VkDescriptorSetLayout gBufferDebug{VK_NULL_HANDLE};
         VkDescriptorSetLayout ssao{VK_NULL_HANDLE};
         VkDescriptorSetLayout ssaoBlur{VK_NULL_HANDLE};
         VkDescriptorSetLayout deferredLighting{VK_NULL_HANDLE};
@@ -125,6 +134,7 @@ public:
 
     struct DescriptorSets {
         VkDescriptorSet scene{VK_NULL_HANDLE};
+        VkDescriptorSet gBufferDebug{VK_NULL_HANDLE};
         VkDescriptorSet ssao{VK_NULL_HANDLE};
         VkDescriptorSet ssaoBlur{VK_NULL_HANDLE};
         VkDescriptorSet deferredLighting{VK_NULL_HANDLE};
@@ -133,6 +143,7 @@ public:
 
     struct PipelineLayouts {
         VkPipelineLayout gBuffer{VK_NULL_HANDLE};
+        VkPipelineLayout gBufferDebug{VK_NULL_HANDLE};
         VkPipelineLayout ssao{VK_NULL_HANDLE};
         VkPipelineLayout ssaoBlur{VK_NULL_HANDLE};
         VkPipelineLayout deferredLighting{VK_NULL_HANDLE};
@@ -142,6 +153,7 @@ public:
     struct Pipelines {
         VkPipeline gBuffer{VK_NULL_HANDLE};
         VkPipeline gBufferInstanced{VK_NULL_HANDLE};
+        VkPipeline gBufferDebug{VK_NULL_HANDLE};
         VkPipeline ssao{VK_NULL_HANDLE};
         VkPipeline ssaoBlur{VK_NULL_HANDLE};
         VkPipeline deferredLighting{VK_NULL_HANDLE};
@@ -181,6 +193,7 @@ public:
 
     AllocatedBuffer instanceBuffer;
     std::vector<InstanceData> instanceCpuData;
+    vkglTF::Model sceneModel;
 
     CameraUBO cameraUBO;
     LightsUBO lightsUBO;
@@ -240,22 +253,35 @@ private:
 
     // 后续逐步把这些空 pass 填成真正的 Lab3 渲染链路。
     void cmdDrawGBuffer(VkCommandBuffer cmd);
+    void cmdDrawGBufferDebug(VkCommandBuffer cmd);
     void cmdDrawSSAO(VkCommandBuffer cmd);
     void cmdDrawSSAOBlur(VkCommandBuffer cmd);
     void cmdDrawDeferredLighting(VkCommandBuffer cmd);
     void cmdDrawComposite(VkCommandBuffer cmd);
     void cmdDrawClearOnly(VkCommandBuffer cmd);
 
+    void transitionAttachmentLayout(RenderAttachment& attachment, VkCommandBuffer cmd, VkImageLayout newLayout, VkImageAspectFlags aspectMask);
+    void transitionGBufferForWriting(VkCommandBuffer cmd);
+    void transitionGBufferForSampling(VkCommandBuffer cmd);
+
     RenderAttachment createColorAttachment(VkExtent2D extent, VkFormat format);
     RenderAttachment createDepthAttachment(VkExtent2D extent, VkFormat format);
     void destroyAttachment(RenderAttachment& attachment);
 
-    const std::string gBufferVertexShader = "lab3/gbuffer.vert.spv";
-    const std::string gBufferFragmentShader = "lab3/gbuffer.frag.spv";
+private:
+    const std::string gBufferVertexShader = "lab3/GBuffer.vert.spv";
+    const std::string gBufferFragmentShader = "lab3/GBuffer.frag.spv";
     const std::string gBufferInstancedVertexShader = "lab3/gbuffer_instanced.vert.spv";
+
+    const std::string gBufferDebugVertexShader = "lab3/fullscreen.vert.spv";
+    const std::string gBufferDebugFragmentShader = "lab3/GBufferDebug.frag.spv";
+
+    const std::string pbrModelPath = "models/DamagedHelmet/DamagedHelmet.gltf";
+    
     const std::string ssaoVertexShader = "lab3/fullscreen.vert.spv";
     const std::string ssaoFragmentShader = "lab3/ssao.frag.spv";
     const std::string ssaoBlurFragmentShader = "lab3/ssaoBlur.frag.spv";
+
     const std::string deferredLightingFragmentShader = "lab3/deferredLighting.frag.spv";
     const std::string compositeFragmentShader = "lab3/composite.frag.spv";
 };
