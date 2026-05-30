@@ -46,8 +46,17 @@ float3 debugColor(FSInput input) {
         float metallic = albedoMetallic.Sample(albedoMetallicSampler, input.uv).a;
         color = float3(metallic, metallic, metallic);
     }
-    // Depth
+    // Emissive
     else if (pushConstants.debugView == 5) {
+        float3 emissive = emissiveAO.Sample(emissiveAOSampler, input.uv).rgb;
+        color = emissive;
+    }
+    else if (pushConstants.debugView == 6) {
+        float ao = emissiveAO.Sample(emissiveAOSampler, input.uv).a;
+        color = float3(ao, ao, ao);
+    }
+    // Depth
+    else if (pushConstants.debugView == 7) {
         float depth = depthMap.Sample(depthMapSampler, input.uv).r;
         // 线性化深度
         float linearDepth = pushConstants.nearPlane * pushConstants.farPlane / (pushConstants.farPlane - depth * (pushConstants.farPlane - pushConstants.nearPlane));

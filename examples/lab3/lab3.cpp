@@ -30,6 +30,8 @@ VulkanExample::VulkanExample() : VulkanExampleBase() {
         "GBuffer Normal",
         "GBuffer Roughness",
         "GBuffer Metallic",
+        "GBuffer Emissive",
+        "GBuffer AO",
         "Depth",
         "SSAO Raw",
         "SSAO Blurred",
