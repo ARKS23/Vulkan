@@ -46,6 +46,7 @@ VulkanExample::~VulkanExample() {
         vkDeviceWaitIdle(device);
 
         destroyPipelines();
+        destroyBloomPass();
         destroyDescriptors();
         destroyUniformBuffers();
         destroyStaticResources();
@@ -66,6 +67,7 @@ void VulkanExample::prepare() {
     createStaticResources();
     createUniformBuffers();
     createDescriptorPool();
+    createBloomPass();
     setupDescriptors();
     createPipelines();
     updateUniformBuffers();
@@ -372,6 +374,33 @@ void VulkanExample::createDescriptorPool() {
     VK_CHECK_RESULT(vkCreateDescriptorPool(device, &poolCI, nullptr, &descriptorPool));
 }
 
+void VulkanExample::createBloomPass() {
+    vkutil::BloomPass::InitInfo initInfo{};
+    initInfo.device = device;
+    initInfo.allocator = allocator;
+    initInfo.descriptorPool = descriptorPool;
+    initInfo.pipelineCache = pipelineCache;
+    initInfo.hdrFormat = hdr.format;
+    initInfo.shaderPath = getShadersPath();
+
+    bloomPass.init(initInfo);
+    resizeBloomPass();
+}
+
+void VulkanExample::resizeBloomPass() {
+    if (!bloomPass.isInitialized()) {
+        return;
+    }
+
+    // BloomPass 只生成线性 HDR bloom 纹理；最终 tone mapping/gamma 仍放在 Final debug shader。
+    bloomPass.resize(hdr.extent, hdr.format, kMaxBloomMipCount);
+    bloomPass.updateSource(hdr.sceneColor.descriptor);
+}
+
+void VulkanExample::destroyBloomPass() {
+    bloomPass.destroy();
+}
+
 void VulkanExample::setupDescriptors() {
     createDescriptorSetLayouts();
     allocateDescriptorSets();
@@ -392,7 +421,8 @@ void VulkanExample::createDescriptorSetLayouts() {
         vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1), // normal + roughness
         vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 2), // emissive + material AO
         vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 3),  // depth
-        vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 4)   // final composite
+        vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 4),  // final HDR scene
+        vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 5)   // final bloom texture
     };
     VkDescriptorSetLayoutCreateInfo gBufferDebugLayoutCI = vkutil::descriptorSetLayoutCreateInfo(gBufferDebugBindings);
     VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &gBufferDebugLayoutCI, nullptr, &descriptorSetLayouts.gBufferDebug));
@@ -459,6 +489,7 @@ void VulkanExample::allocateDescriptorSets() {
 void VulkanExample::updateDescriptorSets() {
     VkDescriptorBufferInfo kernelInfo = vkutil::descriptorBufferInfo(ssao.kernel.handle, ssao.kernel.size);
     VkDescriptorBufferInfo instanceInfo = vkutil::descriptorBufferInfo(instanceBuffer.handle, instanceBuffer.size);
+    VkDescriptorImageInfo bloomOutputInfo = bloomPass.hasOutput() ? bloomPass.getBloomDescriptor() : hdr.sceneColor.descriptor;
 
     for (size_t i = 0; i < descriptorSets.size(); ++i) {
         VkDescriptorBufferInfo cameraInfo = vkutil::descriptorBufferInfo(uniformBuffers[i].camera.handle, sizeof(CameraUBO));
@@ -477,7 +508,9 @@ void VulkanExample::updateDescriptorSets() {
             vkutil::writeCombinedImageSampler(descriptorSets[i].gBufferDebug, 1, &gBuffer.normalRoughness.descriptor),
             vkutil::writeCombinedImageSampler(descriptorSets[i].gBufferDebug, 2, &gBuffer.emissiveAO.descriptor),
             vkutil::writeCombinedImageSampler(descriptorSets[i].gBufferDebug, 3, &gBuffer.depth.descriptor),
-            vkutil::writeCombinedImageSampler(descriptorSets[i].gBufferDebug, 4, &hdr.sceneColor.descriptor)
+            vkutil::writeCombinedImageSampler(descriptorSets[i].gBufferDebug, 4, &hdr.sceneColor.descriptor),
+            // Final 视图读取 BloomPass 产出的线性 HDR bloom 纹理，再统一做显示变换。
+            vkutil::writeCombinedImageSampler(descriptorSets[i].gBufferDebug, 5, &bloomOutputInfo)
         };
         vkutil::updateDescriptorSet(device, gBufferDebugWrites);
 
@@ -680,6 +713,19 @@ void VulkanExample::updateLights() {
     }
 }
 
+void VulkanExample::updateBloomSettings() {
+    renderSettings.bloomMipCount = glm::clamp(
+        renderSettings.bloomMipCount,
+        1,
+        static_cast<int32_t>(kMaxBloomMipCount)
+    );
+
+    bloomSettings.enabled = renderSettings.enableBloom != 0 && renderSettings.debugView == 0;
+    bloomSettings.mipCount = static_cast<uint32_t>(renderSettings.bloomMipCount);
+    bloomSettings.filterRadius = renderSettings.bloomFilterRadius;
+    bloomSettings.useKarisAverage = renderSettings.bloomUseKaris != 0;
+}
+
 void VulkanExample::updateUniformBuffers() {
     cameraUBO.projection = camera.matrices.perspective;
     cameraUBO.view = camera.matrices.view;
@@ -747,6 +793,9 @@ void VulkanExample::buildCommandBuffer() {
     vkutil::cmdTransitionTrackedImageLayout(commandBuffer, hdr.sceneColor.image, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
     cmdDrawDeferredLighting(commandBuffer);
     vkutil::cmdTransitionTrackedImageLayout(commandBuffer, hdr.sceneColor.image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+
+    updateBloomSettings();
+    bloomPass.record(commandBuffer, bloomSettings);
 
     cmdDrawGBufferDebug(commandBuffer);
 
@@ -869,8 +918,11 @@ void VulkanExample::cmdDrawGBufferDebug(VkCommandBuffer cmd) {
 
         GBufferDebugPushConstants pushConstants{};
         pushConstants.debugView = renderSettings.debugView;
+        pushConstants.enableBloom = renderSettings.enableBloom;
         pushConstants.nearPlane = camera.getNearClip();
         pushConstants.farPlane = camera.getFarClip();
+        pushConstants.exposure = renderSettings.exposure;
+        pushConstants.bloomStrength = renderSettings.bloomStrength;
         vkCmdPushConstants(
             cmd,
             pipelineLayouts.gBufferDebug,
@@ -934,7 +986,7 @@ void VulkanExample::cmdDrawDeferredLighting(VkCommandBuffer cmd) {
 
 void VulkanExample::cmdDrawComposite(VkCommandBuffer cmd) {
     (void)cmd;
-    // TODO(Lab3): HDR -> tone mapping/gamma -> swapchain; Bloom can be added later.
+    // TODO(Lab3): 如果后续拆出独立 CompositePass，再把 Final debug 里的显示变换搬到这里。
 }
 
 void VulkanExample::cmdDrawClearOnly(VkCommandBuffer cmd) {
@@ -977,6 +1029,7 @@ void VulkanExample::windowResized() {
 
     destroyFrameResources();
     createFrameResources();
+    resizeBloomPass();
 
     if (descriptorSetLayouts.scene != VK_NULL_HANDLE) {
         updateDescriptorSets();
@@ -994,6 +1047,10 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay) {
         overlay->sliderInt("Lights", &renderSettings.lightCount, 1, static_cast<int32_t>(kMaxLightCount));
         overlay->sliderFloat("Light Intensity", &renderSettings.lightIntensity, 1.0f, 80.0f);
         overlay->sliderFloat("Exposure", &renderSettings.exposure, 0.1f, 5.0f);
+        overlay->sliderFloat("Bloom Strength", &renderSettings.bloomStrength, 0.0f, 0.5f);
+        overlay->sliderFloat("Bloom Radius", &renderSettings.bloomFilterRadius, 0.1f, 5.0f);
+        overlay->sliderInt("Bloom Mips", &renderSettings.bloomMipCount, 1, static_cast<int32_t>(kMaxBloomMipCount));
+        overlay->checkBox("Bloom Karis", &renderSettings.bloomUseKaris);
     }
 
     if (overlay->header("SSAO Settings")) {

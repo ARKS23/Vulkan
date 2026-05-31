@@ -10,9 +10,12 @@ struct FSOutput {
 
 struct GBufferDebugPushConstants {
     int debugView;
+    int enableBloom;
     float nearPlane;
     float farPlane;
-    float padding;
+    float exposure;
+    float bloomStrength;
+    float2 padding;
 };
 [[vk::push_constant]] GBufferDebugPushConstants pushConstants;
 
@@ -31,11 +34,22 @@ SamplerState depthMapSampler : register(s3);
 Texture2D sceneColor : register(t4);
 SamplerState sceneColorSampler : register(s4);
 
+Texture2D bloomTexture : register(t5);
+SamplerState bloomSampler : register(s5);
+
 float3 debugColor(FSInput input) {
     float3 color = float3(0.xxx);
     // final composite
     if (pushConstants.debugView == 0) {
-        color = sceneColor.Sample(sceneColorSampler, input.uv).rgb;
+        float3 hdrColor = sceneColor.Sample(sceneColorSampler, input.uv).rgb;
+        float3 bloomColor = bloomTexture.Sample(bloomSampler, input.uv).rgb;
+        if (pushConstants.enableBloom == 0) {
+            bloomColor = float3(0.0, 0.0, 0.0);
+        }
+
+        // Bloom 仍然在线性 HDR 空间合成；只有最终输出到 swapchain 前才做显示变换。
+        color = hdrColor + bloomColor * pushConstants.bloomStrength;
+        color *= pushConstants.exposure;
         color = ACESFilm(color);
         color = LinearToSRGB(color);
     }

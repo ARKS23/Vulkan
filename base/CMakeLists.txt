@@ -18,7 +18,9 @@ list(APPEND BASE_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/vk_descriptors.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/vk_descriptors.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/vk_pipelines.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/vk_pipelines.cpp")
+    "${CMAKE_CURRENT_SOURCE_DIR}/vk_pipelines.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vk_bloom.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vk_bloom.cpp")
 list(REMOVE_DUPLICATES BASE_SRC)
 
 set(KTX_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/ktx)

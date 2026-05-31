@@ -21,6 +21,7 @@
 
 #include "vk_images.h"
 #include "vk_initializers.h"
+#include "vk_bloom.h"
 #include "VulkanTexture.h"
 
 /*
@@ -41,6 +42,7 @@ public:
     static constexpr uint32_t kSSAONoiseDim = 4;
     static constexpr uint32_t kMaxInstanceCount = 1024;
     static constexpr uint32_t kMaxLightCount = 150;
+    static constexpr uint32_t kMaxBloomMipCount = 8;
 
     struct CameraUBO {
         glm::mat4 projection{1.0f};
@@ -103,9 +105,12 @@ public:
 
     struct GBufferDebugPushConstants {
         int32_t debugView{0};
+        int32_t enableBloom{1};
         float nearPlane{0.1f};
         float farPlane{256.0f};
-        float padding{0.0f}; // 对齐到 16 字节，方便 shader 端按 push constant 读取。
+        float exposure{1.0f};
+        float bloomStrength{0.08f};
+        glm::vec2 padding{0.0f}; // 对齐到 16 字节，方便 shader 端稳定读取。
     };
 
     struct SSAOResources {
@@ -166,11 +171,15 @@ public:
         int32_t enableSSAO{1};
         int32_t enableSSAOBlur{1};
         int32_t enableInstancing{1};
-        int32_t enableBloom{0};
+        int32_t enableBloom{1};
         int32_t instanceCount{128};
         int32_t lightCount{static_cast<int32_t>(kMaxLightCount)};
         float lightIntensity{25.0f};
         float exposure{1.0f};
+        float bloomStrength{0.08f};
+        float bloomFilterRadius{0.5f};
+        int32_t bloomMipCount{5};
+        int32_t bloomUseKaris{1};
     };
 
     struct SSAOSettings {
@@ -193,6 +202,8 @@ public:
     DescriptorSetLayouts descriptorSetLayouts;
     PipelineLayouts pipelineLayouts;
     Pipelines pipelines;
+    vkutil::BloomPass bloomPass;
+    vkutil::BloomPass::Settings bloomSettings;
 
     AllocatedBuffer instanceBuffer;
     std::vector<InstanceData> instanceCpuData;
@@ -242,6 +253,9 @@ private:
     void destroyUniformBuffers();
 
     void createDescriptorPool();
+    void createBloomPass();
+    void resizeBloomPass();
+    void destroyBloomPass();
     void setupDescriptors();
     void createDescriptorSetLayouts();
     void allocateDescriptorSets();
@@ -253,6 +267,7 @@ private:
 
     void updateUniformBuffers();
     void updateLights();
+    void updateBloomSettings();
     void buildCommandBuffer();
 
     // 后续逐步把这些空 pass 填成真正的 Lab3 渲染链路。
