@@ -43,6 +43,7 @@ public:
     static constexpr uint32_t kMaxInstanceCount = 1024;
     static constexpr uint32_t kMaxLightCount = 150;
     static constexpr uint32_t kMaxBloomMipCount = 8;
+    static constexpr uint32_t kLightRadiusDebugSegments = 96;
 
     struct CameraUBO {
         glm::mat4 projection{1.0f};
@@ -78,6 +79,10 @@ public:
         glm::vec4 color{1.0f};
         // 正式 PBR 材质来自 glTF 贴图；这里保留为每实例调制参数/扩展位。
         glm::vec4 materialParams{1.0f, 1.0f, 1.0f, 0.0f}; // metallicMul, roughnessMul, emissiveMul, materialIndex/unused
+    };
+
+    struct LightRadiusDebugVertex {
+        glm::vec3 position{0.0f};
     };
 
     struct FrameUniformBuffers {
@@ -155,6 +160,7 @@ public:
         VkPipelineLayout ssaoBlur{VK_NULL_HANDLE};
         VkPipelineLayout deferredLighting{VK_NULL_HANDLE};
         VkPipelineLayout lightProxy{VK_NULL_HANDLE};
+        VkPipelineLayout lightRadiusDebug{VK_NULL_HANDLE};
         VkPipelineLayout composite{VK_NULL_HANDLE};
     };
 
@@ -166,6 +172,7 @@ public:
         VkPipeline ssaoBlur{VK_NULL_HANDLE};
         VkPipeline deferredLighting{VK_NULL_HANDLE};
         VkPipeline lightProxy{VK_NULL_HANDLE};
+        VkPipeline lightRadiusDebug{VK_NULL_HANDLE};
         VkPipeline composite{VK_NULL_HANDLE};
     };
 
@@ -176,6 +183,7 @@ public:
         int32_t enableInstancing{1};
         int32_t enableBloom{1};
         int32_t showLightProxy{1};
+        int32_t showLightRadiusDebug{0};
         int32_t instanceCount{128};
         int32_t lightCount{static_cast<int32_t>(kMaxLightCount)};
         float lightIntensity{25.0f};
@@ -212,6 +220,8 @@ public:
     vkutil::BloomPass::Settings bloomSettings;
 
     AllocatedBuffer instanceBuffer;
+    AllocatedBuffer lightRadiusDebugBuffer;
+    uint32_t lightRadiusDebugVertexCount{0};
     std::vector<InstanceData> instanceCpuData;
     vkglTF::Model sceneModel;
     vkglTF::Model lightProxyModel;
@@ -254,6 +264,7 @@ private:
     void createSSAONoiseTexture();
     void createSSAOKernelBuffer();
     void createInstanceBuffer();
+    void createLightRadiusDebugBuffer();
     void updateInstanceBuffer();
 
     void createUniformBuffers();
@@ -284,6 +295,7 @@ private:
     void cmdDrawSSAOBlur(VkCommandBuffer cmd);
     void cmdDrawDeferredLighting(VkCommandBuffer cmd);
     void cmdDrawLightProxy(VkCommandBuffer cmd);
+    void cmdDrawLightRadiusDebug(VkCommandBuffer cmd);
     void cmdDrawComposite(VkCommandBuffer cmd);
     void cmdDrawClearOnly(VkCommandBuffer cmd);
 
@@ -309,6 +321,8 @@ private:
     const std::string lightProxyModelPath = "models/sphere.gltf";
     const std::string lightProxyVertexShader = "lab3/lightProxy.vert.spv";
     const std::string lightProxyFragmentShader = "lab3/lightProxy.frag.spv";
+    const std::string lightRadiusDebugVertexShader = "lab3/lightRadiusDebug.vert.spv";
+    const std::string lightRadiusDebugFragmentShader = "lab3/lightRadiusDebug.frag.spv";
     
     const std::string ssaoVertexShader = "lab3/fullscreen.vert.spv";
     const std::string ssaoFragmentShader = "lab3/ssao.frag.spv";

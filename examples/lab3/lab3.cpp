@@ -5,6 +5,8 @@
 #include "vk_rendering.h"
 #include "VulkanTools.h"
 
+#include <cstddef>
+
 VulkanExample::VulkanExample() : VulkanExampleBase() {
     title = "Lab3 : Deferred Rendering + SSAO + Instancing";
 
@@ -226,12 +228,15 @@ void VulkanExample::createStaticResources() {
     createSSAONoiseTexture();
     createSSAOKernelBuffer();
     createInstanceBuffer();
+    createLightRadiusDebugBuffer();
 }
 
 void VulkanExample::destroyStaticResources() {
     vkutil::destroyTexture(device, allocator, ssao.noise);
     vkutil::destroyAllocatedBuffer(allocator, ssao.kernel);
     vkutil::destroyAllocatedBuffer(allocator, instanceBuffer);
+    vkutil::destroyAllocatedBuffer(allocator, lightRadiusDebugBuffer);
+    lightRadiusDebugVertexCount = 0;
     instanceCpuData.clear();
 }
 
@@ -304,6 +309,61 @@ void VulkanExample::createInstanceBuffer() {
 
     memcpy(instanceBuffer.allocationInfo.pMappedData, instanceCpuData.data(), instanceBuffer.size);
     vmaFlushAllocation(allocator, instanceBuffer.allocation, 0, instanceBuffer.size);
+}
+
+void VulkanExample::createLightRadiusDebugBuffer() {
+    std::vector<LightRadiusDebugVertex> vertices;
+    vertices.reserve(kLightRadiusDebugSegments * 3);
+
+    auto addDashedCircle = [&](uint32_t plane) {
+        constexpr float twoPi = 6.28318530718f;
+        for (uint32_t i = 0; i < kLightRadiusDebugSegments; ++i) {
+            // 每隔一段跳过一次，直接用 LINE_LIST 形成虚线，不依赖 geometry shader 或片段 discard。
+            if ((i % 4) >= 2) {
+                continue;
+            }
+
+            const float a0 = twoPi * static_cast<float>(i) / static_cast<float>(kLightRadiusDebugSegments);
+            const float a1 = twoPi * static_cast<float>(i + 1) / static_cast<float>(kLightRadiusDebugSegments);
+            const float c0 = std::cos(a0);
+            const float s0 = std::sin(a0);
+            const float c1 = std::cos(a1);
+            const float s1 = std::sin(a1);
+
+            glm::vec3 p0{0.0f};
+            glm::vec3 p1{0.0f};
+            if (plane == 0) {
+                p0 = glm::vec3(c0, s0, 0.0f);
+                p1 = glm::vec3(c1, s1, 0.0f);
+            } else if (plane == 1) {
+                p0 = glm::vec3(c0, 0.0f, s0);
+                p1 = glm::vec3(c1, 0.0f, s1);
+            } else {
+                p0 = glm::vec3(0.0f, c0, s0);
+                p1 = glm::vec3(0.0f, c1, s1);
+            }
+
+            vertices.push_back({p0});
+            vertices.push_back({p1});
+        }
+    };
+
+    addDashedCircle(0);
+    addDashedCircle(1);
+    addDashedCircle(2);
+
+    lightRadiusDebugVertexCount = static_cast<uint32_t>(vertices.size());
+    const VkDeviceSize bufferSize = sizeof(LightRadiusDebugVertex) * vertices.size();
+    lightRadiusDebugBuffer = vkutil::createAllocatedBuffer(
+        allocator,
+        bufferSize,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        VMA_MEMORY_USAGE_AUTO
+    );
+
+    memcpy(lightRadiusDebugBuffer.allocationInfo.pMappedData, vertices.data(), static_cast<size_t>(bufferSize));
+    vmaFlushAllocation(allocator, lightRadiusDebugBuffer.allocation, 0, bufferSize);
 }
 
 void VulkanExample::updateInstanceBuffer() {
@@ -588,6 +648,7 @@ void VulkanExample::createPipelines() {
     pipelineLayouts.ssaoBlur = vkutil::createPipelineLayout(device, {descriptorSetLayouts.ssaoBlur});
     pipelineLayouts.deferredLighting = vkutil::createPipelineLayout(device, {descriptorSetLayouts.deferredLighting});
     pipelineLayouts.lightProxy = vkutil::createPipelineLayout(device, {descriptorSetLayouts.scene});
+    pipelineLayouts.lightRadiusDebug = vkutil::createPipelineLayout(device, {descriptorSetLayouts.scene});
     pipelineLayouts.composite = vkutil::createPipelineLayout(device, {descriptorSetLayouts.composite});
 
     // TODO(Lab3): shader 鍐欏ソ鍚庡湪杩欓噷鍒涘缓 gBuffer / SSAO / deferred lighting / composite pipelines銆?    // G-Buffer pipeline
@@ -651,10 +712,42 @@ void VulkanExample::createPipelines() {
         .setCullMode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE)
         .disableBlending();
     pipelines.lightProxy = lightProxyBuilder.build(device, pipelineCache);
+
+    // Light radius debug pipeline: instance a dashed unit-sphere wireframe and scale it by light.intensity.w.
+    VkVertexInputBindingDescription radiusBinding{};
+    radiusBinding.binding = 0;
+    radiusBinding.stride = sizeof(LightRadiusDebugVertex);
+    radiusBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    VkVertexInputAttributeDescription radiusAttribute{};
+    radiusAttribute.location = 0;
+    radiusAttribute.binding = 0;
+    radiusAttribute.format = VK_FORMAT_R32G32B32_SFLOAT;
+    radiusAttribute.offset = offsetof(LightRadiusDebugVertex, position);
+
+    VkPipelineVertexInputStateCreateInfo radiusVertexInput{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+    radiusVertexInput.vertexBindingDescriptionCount = 1;
+    radiusVertexInput.pVertexBindingDescriptions = &radiusBinding;
+    radiusVertexInput.vertexAttributeDescriptionCount = 1;
+    radiusVertexInput.pVertexAttributeDescriptions = &radiusAttribute;
+
+    vkutil::PipelineBuilder lightRadiusDebugBuilder;
+    lightRadiusDebugBuilder.setPipelineLayout(pipelineLayouts.lightRadiusDebug)
+        .setShaders(
+            loadShader(getShadersPath() + lightRadiusDebugVertexShader, VK_SHADER_STAGE_VERTEX_BIT),
+            loadShader(getShadersPath() + lightRadiusDebugFragmentShader, VK_SHADER_STAGE_FRAGMENT_BIT))
+        .setVertexInput(radiusVertexInput)
+        .setInputTopology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST)
+        .setColorAttachmentFormat(hdr.format)
+        .setDepthFormat(gBuffer.depthAttachmentFormat)
+        .enableDepthTest(false, VK_COMPARE_OP_LESS_OR_EQUAL)
+        .setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
+        .enableAlphaBlending();
+    pipelines.lightRadiusDebug = lightRadiusDebugBuilder.build(device, pipelineCache);
 }
 
 void VulkanExample::destroyPipelines() {
-    std::array<VkPipeline*, 8> pipelineHandles = {
+    std::array<VkPipeline*, 9> pipelineHandles = {
         &pipelines.gBuffer,
         &pipelines.gBufferInstanced,
         &pipelines.gBufferDebug,
@@ -662,6 +755,7 @@ void VulkanExample::destroyPipelines() {
         &pipelines.ssaoBlur,
         &pipelines.deferredLighting,
         &pipelines.lightProxy,
+        &pipelines.lightRadiusDebug,
         &pipelines.composite
     };
     for (VkPipeline* pipeline : pipelineHandles) {
@@ -671,13 +765,14 @@ void VulkanExample::destroyPipelines() {
         }
     }
 
-    std::array<VkPipelineLayout*, 7> layoutHandles = {
+    std::array<VkPipelineLayout*, 8> layoutHandles = {
         &pipelineLayouts.gBuffer,
         &pipelineLayouts.gBufferDebug,
         &pipelineLayouts.ssao,
         &pipelineLayouts.ssaoBlur,
         &pipelineLayouts.deferredLighting,
         &pipelineLayouts.lightProxy,
+        &pipelineLayouts.lightRadiusDebug,
         &pipelineLayouts.composite
     };
     for (VkPipelineLayout* layout : layoutHandles) {
@@ -1030,6 +1125,7 @@ void VulkanExample::cmdDrawDeferredLighting(VkCommandBuffer cmd) {
 
         // 光源球画进 HDR sceneColor，后续 Bloom 会自然把它们扩散成光晕。
         cmdDrawLightProxy(cmd);
+        cmdDrawLightRadiusDebug(cmd);
     }
     vkutil::cmdEndRendering(cmd);
 }
@@ -1055,6 +1151,39 @@ void VulkanExample::cmdDrawLightProxy(VkCommandBuffer cmd) {
     lightProxyModel.drawInstanced(
         cmd,
         static_cast<uint32_t>(renderSettings.lightCount)
+    );
+}
+
+void VulkanExample::cmdDrawLightRadiusDebug(VkCommandBuffer cmd) {
+    if (renderSettings.showLightRadiusDebug == 0 ||
+        pipelines.lightRadiusDebug == VK_NULL_HANDLE ||
+        lightRadiusDebugBuffer.handle == VK_NULL_HANDLE ||
+        lightRadiusDebugVertexCount == 0 ||
+        renderSettings.lightCount <= 0) {
+        return;
+    }
+
+    vkutil::cmdSetViewportAndScissor(cmd, width, height);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.lightRadiusDebug);
+    vkCmdBindDescriptorSets(
+        cmd,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        pipelineLayouts.lightRadiusDebug,
+        0,
+        1,
+        &descriptorSets[currentBuffer].scene,
+        0,
+        nullptr
+    );
+
+    VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &lightRadiusDebugBuffer.handle, &offset);
+    vkCmdDraw(
+        cmd,
+        lightRadiusDebugVertexCount,
+        static_cast<uint32_t>(renderSettings.lightCount),
+        0,
+        0
     );
 }
 
@@ -1121,6 +1250,7 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay) {
         overlay->sliderInt("Lights", &renderSettings.lightCount, 1, static_cast<int32_t>(kMaxLightCount));
         overlay->sliderFloat("Light Intensity", &renderSettings.lightIntensity, 1.0f, 80.0f);
         overlay->checkBox("Light Proxy", &renderSettings.showLightProxy);
+        overlay->checkBox("Light Radius Debug", &renderSettings.showLightRadiusDebug);
         overlay->sliderFloat("Light Visual", &renderSettings.lightVisualIntensity, 0.0f, 80.0f);
         overlay->sliderFloat("Light Radius", &renderSettings.lightVisualRadius, 0.03f, 0.8f);
         overlay->sliderFloat("Exposure", &renderSettings.exposure, 0.1f, 5.0f);
