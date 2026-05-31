@@ -56,6 +56,7 @@ public:
     struct Light {
         glm::vec4 position{0.0f};
         glm::vec4 color{1.0f};
+        // x: PBR 照明强度，y: 光源球显示亮度，z: 光源球显示半径，w: 实际照明半径。
         glm::vec4 intensity{1.0f};
     };
 
@@ -153,6 +154,7 @@ public:
         VkPipelineLayout ssao{VK_NULL_HANDLE};
         VkPipelineLayout ssaoBlur{VK_NULL_HANDLE};
         VkPipelineLayout deferredLighting{VK_NULL_HANDLE};
+        VkPipelineLayout lightProxy{VK_NULL_HANDLE};
         VkPipelineLayout composite{VK_NULL_HANDLE};
     };
 
@@ -163,6 +165,7 @@ public:
         VkPipeline ssao{VK_NULL_HANDLE};
         VkPipeline ssaoBlur{VK_NULL_HANDLE};
         VkPipeline deferredLighting{VK_NULL_HANDLE};
+        VkPipeline lightProxy{VK_NULL_HANDLE};
         VkPipeline composite{VK_NULL_HANDLE};
     };
 
@@ -172,9 +175,12 @@ public:
         int32_t enableSSAOBlur{1};
         int32_t enableInstancing{1};
         int32_t enableBloom{1};
+        int32_t showLightProxy{1};
         int32_t instanceCount{128};
         int32_t lightCount{static_cast<int32_t>(kMaxLightCount)};
         float lightIntensity{25.0f};
+        float lightVisualIntensity{18.0f};
+        float lightVisualRadius{0.18f};
         float exposure{1.0f};
         float bloomStrength{0.08f};
         float bloomFilterRadius{0.5f};
@@ -208,6 +214,7 @@ public:
     AllocatedBuffer instanceBuffer;
     std::vector<InstanceData> instanceCpuData;
     vkglTF::Model sceneModel;
+    vkglTF::Model lightProxyModel;
 
     CameraUBO cameraUBO;
     LightsUBO lightsUBO;
@@ -276,6 +283,7 @@ private:
     void cmdDrawSSAO(VkCommandBuffer cmd);
     void cmdDrawSSAOBlur(VkCommandBuffer cmd);
     void cmdDrawDeferredLighting(VkCommandBuffer cmd);
+    void cmdDrawLightProxy(VkCommandBuffer cmd);
     void cmdDrawComposite(VkCommandBuffer cmd);
     void cmdDrawClearOnly(VkCommandBuffer cmd);
 
@@ -298,6 +306,9 @@ private:
     const std::string gBufferDebugFragmentShader = "lab3/GBufferDebug.frag.spv";
 
     const std::string pbrModelPath = "models/DamagedHelmet/DamagedHelmet.gltf";
+    const std::string lightProxyModelPath = "models/sphere.gltf";
+    const std::string lightProxyVertexShader = "lab3/lightProxy.vert.spv";
+    const std::string lightProxyFragmentShader = "lab3/lightProxy.frag.spv";
     
     const std::string ssaoVertexShader = "lab3/fullscreen.vert.spv";
     const std::string ssaoFragmentShader = "lab3/ssao.frag.spv";

@@ -88,15 +88,25 @@ FSOutput main(FSInput input) {
     const int lightCount = min(lightsInfo.lightCount.x, MAX_LIGHT_COUNT);
     for (int i = 0; i < lightCount; ++i) {
         Light light = lightsInfo.lights[i];
+
+        // 有限半径优化 Early Culling 
+        float lightRadius = light.intensity.w;
+        float dist2 = dot(light.position.xyz - worldPos, light.position.xyz - worldPos);
+        float lightRadius2 = lightRadius * lightRadius;
+        if (dist2 > lightRadius2) continue;
+
         float3 L = normalize(light.position.xyz - worldPos);
         float3 V = normalize(cameraInfo.cameraPos.xyz - worldPos);
         float3 H = normalize(L + V);
 
         float distance = length(light.position.xyz - worldPos);
-        float attenuation = 1.0f / (distance * distance);
+        float distance2 = distance * distance;
+        float attenuation = 1.0f / max(distance2, 0.0001f);
+        float falloff = saturate(1.0f - distance / lightRadius);
+        falloff *= falloff; // 二次衰减，增加光线边缘的柔和度
 
         float3 brdf = direcBRDF(N, V, L, H, roughness, metallic, albedo, F0);
-        float3 radiance = light.color.rgb * light.intensity.x * attenuation;
+        float3 radiance = light.color.rgb * light.intensity.x * attenuation * falloff;
         float NdotL = max(dot(N, L), 0.0001f);
         Lo += radiance * brdf * NdotL;
     }

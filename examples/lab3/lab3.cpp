@@ -135,6 +135,13 @@ void VulkanExample::loadAssets() {
         queue,
         vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY
     );
+
+    lightProxyModel.loadFromFile(
+        getAssetPath() + lightProxyModelPath,
+        vulkanDevice,
+        queue,
+        vkglTF::FileLoadingFlags::PreTransformVertices | vkglTF::FileLoadingFlags::FlipY
+    );
 }
 
 void VulkanExample::destroyAssets() {
@@ -410,7 +417,7 @@ void VulkanExample::setupDescriptors() {
 void VulkanExample::createDescriptorSetLayouts() {
     std::vector<VkDescriptorSetLayoutBinding> sceneBindings = {
         vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0),
-        vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 1),
+        vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 1),
         vkutil::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 2)
     };
     VkDescriptorSetLayoutCreateInfo sceneLayoutCI = vkutil::descriptorSetLayoutCreateInfo(sceneBindings);
@@ -580,6 +587,7 @@ void VulkanExample::createPipelines() {
     pipelineLayouts.ssao = vkutil::createPipelineLayout(device, {descriptorSetLayouts.ssao});
     pipelineLayouts.ssaoBlur = vkutil::createPipelineLayout(device, {descriptorSetLayouts.ssaoBlur});
     pipelineLayouts.deferredLighting = vkutil::createPipelineLayout(device, {descriptorSetLayouts.deferredLighting});
+    pipelineLayouts.lightProxy = vkutil::createPipelineLayout(device, {descriptorSetLayouts.scene});
     pipelineLayouts.composite = vkutil::createPipelineLayout(device, {descriptorSetLayouts.composite});
 
     // TODO(Lab3): shader 鍐欏ソ鍚庡湪杩欓噷鍒涘缓 gBuffer / SSAO / deferred lighting / composite pipelines銆?    // G-Buffer pipeline
@@ -624,20 +632,36 @@ void VulkanExample::createPipelines() {
             loadShader(lightingFragmentPath, VK_SHADER_STAGE_FRAGMENT_BIT))
         .setEmptyVertexInput()
         .setColorAttachmentFormat(hdr.format)
+        .setDepthFormat(gBuffer.depthAttachmentFormat)
         .disableDepthTest()
         .setCullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
         .disableBlending();
     pipelines.deferredLighting = lightingBuilder.build(device, pipelineCache);
+
+    // Light proxy pipeline: draw visible emissive spheres into the HDR scene before Bloom.
+    vkutil::PipelineBuilder lightProxyBuilder;
+    lightProxyBuilder.setPipelineLayout(pipelineLayouts.lightProxy)
+        .setShaders(
+            loadShader(getShadersPath() + lightProxyVertexShader, VK_SHADER_STAGE_VERTEX_BIT),
+            loadShader(getShadersPath() + lightProxyFragmentShader, VK_SHADER_STAGE_FRAGMENT_BIT))
+        .setVertexInput(*vkglTF::Vertex::getPipelineVertexInputState({ vkglTF::VertexComponent::Position }))
+        .setColorAttachmentFormat(hdr.format)
+        .setDepthFormat(gBuffer.depthAttachmentFormat)
+        .enableDepthTest(false, VK_COMPARE_OP_LESS_OR_EQUAL)
+        .setCullMode(VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE)
+        .disableBlending();
+    pipelines.lightProxy = lightProxyBuilder.build(device, pipelineCache);
 }
 
 void VulkanExample::destroyPipelines() {
-    std::array<VkPipeline*, 7> pipelineHandles = {
+    std::array<VkPipeline*, 8> pipelineHandles = {
         &pipelines.gBuffer,
         &pipelines.gBufferInstanced,
         &pipelines.gBufferDebug,
         &pipelines.ssao,
         &pipelines.ssaoBlur,
         &pipelines.deferredLighting,
+        &pipelines.lightProxy,
         &pipelines.composite
     };
     for (VkPipeline* pipeline : pipelineHandles) {
@@ -647,12 +671,13 @@ void VulkanExample::destroyPipelines() {
         }
     }
 
-    std::array<VkPipelineLayout*, 6> layoutHandles = {
+    std::array<VkPipelineLayout*, 7> layoutHandles = {
         &pipelineLayouts.gBuffer,
         &pipelineLayouts.gBufferDebug,
         &pipelineLayouts.ssao,
         &pipelineLayouts.ssaoBlur,
         &pipelineLayouts.deferredLighting,
+        &pipelineLayouts.lightProxy,
         &pipelineLayouts.composite
     };
     for (VkPipelineLayout* layout : layoutHandles) {
@@ -689,7 +714,7 @@ void VulkanExample::updateLights() {
         const float t = (static_cast<float>(i) + 0.5f) / static_cast<float>(activeLightCount);
         const float angle = static_cast<float>(i) * goldenAngle;
         const float radius = maxRadius * std::sqrt(t);
-        const float height = 2.0f + 3.5f * (0.5f + 0.5f * std::sin(static_cast<float>(i) * 0.73f));
+        const float height = -5.0f + 3.5f * (0.5f + 0.5f * std::sin(static_cast<float>(i) * 0.73f));
 
         const glm::vec3 position(
             std::cos(angle) * radius,
@@ -705,11 +730,18 @@ void VulkanExample::updateLights() {
         color = glm::mix(color, glm::vec3(1.0f), 0.18f);
 
         const float variation = 0.75f + 0.5f * (static_cast<float>(i % 7) / 6.0f);
-        const float intensity = renderSettings.lightIntensity * variation;
+        const float lightingIntensity = renderSettings.lightIntensity * variation;
+        const float visualIntensity = renderSettings.lightVisualIntensity * variation;
+        const float visualRadius = renderSettings.lightVisualRadius;
+        // 将光源球的显示半径映射到实际照明半径：UI 调整 Light Radius 时，early culling 的范围也会同步变化。
+        const float lightingRadiusScale = 55.0f;
+        const float minLightingRadius = 1.0f;
+        const float lightingRadius = glm::max(visualRadius * lightingRadiusScale * std::sqrt(variation), minLightingRadius);
 
         light.position = glm::vec4(position, 1.0f);
         light.color = glm::vec4(color, 1.0f);
-        light.intensity = glm::vec4(intensity, 0.0f, 0.0f, 0.0f);
+        // x 给 deferred/PBR 照明使用，y/z 只给光源球可视化使用，两套强度彼此独立。
+        light.intensity = glm::vec4(lightingIntensity, visualIntensity, visualRadius, lightingRadius);
     }
 }
 
@@ -964,7 +996,22 @@ void VulkanExample::cmdDrawDeferredLighting(VkCommandBuffer cmd) {
         VkClearValue{{0.0f, 0.0f, 0.0f, 1.0f}}
     );
 
-    vkutil::cmdBeginColorOnlyRendering(cmd, VkExtent2D{width, height}, colorAttachment);
+    VkRenderingAttachmentInfo depthAttachment = vkutil::renderingdepthAttachmentInfo(
+        gBuffer.depth.image.imageView,
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+        1.0f,
+        VK_ATTACHMENT_LOAD_OP_LOAD,
+        VK_ATTACHMENT_STORE_OP_STORE
+    );
+
+    VkRenderingInfo renderingInfo{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    renderingInfo.renderArea = {{0, 0}, VkExtent2D{width, height}};
+    renderingInfo.layerCount = 1;
+    renderingInfo.colorAttachmentCount = 1;
+    renderingInfo.pColorAttachments = &colorAttachment;
+    renderingInfo.pDepthAttachment = &depthAttachment;
+
+    vkCmdBeginRendering(cmd, &renderingInfo);
     {
         vkutil::cmdSetViewportAndScissor(cmd, width, height);
 
@@ -980,8 +1027,35 @@ void VulkanExample::cmdDrawDeferredLighting(VkCommandBuffer cmd) {
             nullptr
         );
         vkCmdDraw(cmd, 3, 1, 0, 0);
+
+        // 光源球画进 HDR sceneColor，后续 Bloom 会自然把它们扩散成光晕。
+        cmdDrawLightProxy(cmd);
     }
     vkutil::cmdEndRendering(cmd);
+}
+
+void VulkanExample::cmdDrawLightProxy(VkCommandBuffer cmd) {
+    if (renderSettings.showLightProxy == 0 || pipelines.lightProxy == VK_NULL_HANDLE || renderSettings.lightCount <= 0) {
+        return;
+    }
+
+    vkutil::cmdSetViewportAndScissor(cmd, width, height);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.lightProxy);
+    vkCmdBindDescriptorSets(
+        cmd,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        pipelineLayouts.lightProxy,
+        0,
+        1,
+        &descriptorSets[currentBuffer].scene,
+        0,
+        nullptr
+    );
+
+    lightProxyModel.drawInstanced(
+        cmd,
+        static_cast<uint32_t>(renderSettings.lightCount)
+    );
 }
 
 void VulkanExample::cmdDrawComposite(VkCommandBuffer cmd) {
@@ -1046,6 +1120,9 @@ void VulkanExample::OnUpdateUIOverlay(vks::UIOverlay* overlay) {
         overlay->sliderInt("Instances", &renderSettings.instanceCount, 1, static_cast<int32_t>(kMaxInstanceCount));
         overlay->sliderInt("Lights", &renderSettings.lightCount, 1, static_cast<int32_t>(kMaxLightCount));
         overlay->sliderFloat("Light Intensity", &renderSettings.lightIntensity, 1.0f, 80.0f);
+        overlay->checkBox("Light Proxy", &renderSettings.showLightProxy);
+        overlay->sliderFloat("Light Visual", &renderSettings.lightVisualIntensity, 0.0f, 80.0f);
+        overlay->sliderFloat("Light Radius", &renderSettings.lightVisualRadius, 0.03f, 0.8f);
         overlay->sliderFloat("Exposure", &renderSettings.exposure, 0.1f, 5.0f);
         overlay->sliderFloat("Bloom Strength", &renderSettings.bloomStrength, 0.0f, 0.5f);
         overlay->sliderFloat("Bloom Radius", &renderSettings.bloomFilterRadius, 0.1f, 5.0f);
